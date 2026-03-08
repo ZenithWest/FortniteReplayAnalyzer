@@ -151,22 +151,14 @@ public partial class FortniteReplayAnalyzer : Form
         damageFilterPanel.Controls.Add(_chkDamageStructures);
         damageFilterPanel.Controls.Add(_chkDamageNpcs);
 
-        var damageEventsLayout = new TableLayoutPanel
-        {
-            ColumnCount = 1,
-            Dock = DockStyle.Fill,
-            Margin = Padding.Empty,
-            Padding = Padding.Empty,
-            RowCount = 2
-        };
-        damageEventsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        damageEventsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
-        damageEventsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        damageFilterPanel.Dock = DockStyle.Top;
+        damageFilterPanel.Height = 34;
+        damageFilterPanel.BackColor = SystemColors.Control;
 
-        grpCombatEvents.Controls.Remove(dgvCombatEvents);
-        damageEventsLayout.Controls.Add(damageFilterPanel, 0, 0);
-        damageEventsLayout.Controls.Add(dgvCombatEvents, 0, 1);
-        grpCombatEvents.Controls.Add(damageEventsLayout);
+        grpCombatEvents.Controls.Clear();
+        dgvCombatEvents.Dock = DockStyle.Fill;
+        grpCombatEvents.Controls.Add(dgvCombatEvents);
+        grpCombatEvents.Controls.Add(damageFilterPanel);
 
         _grpPlayerDamageLog = new GroupBox
         {
@@ -250,8 +242,7 @@ public partial class FortniteReplayAnalyzer : Form
         };
         _openedReplayTabs.SelectedIndexChanged += async (_, _) => await HandleReplayTabSelectionChangedAsync();
 
-        splitMain.Panel2.Padding = new Padding(0, 25,0, 0);
-
+        splitMain.Panel2.Padding = new Padding(0, 25, 0, 0);
         splitMain.Panel2.Controls.Clear();
         splitMain.Panel2.Controls.Add(_openedReplayTabs);
         splitMain.SplitterDistance = ExpandedReplayPaneWidth;
