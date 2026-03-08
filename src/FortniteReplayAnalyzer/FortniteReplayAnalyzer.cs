@@ -68,7 +68,8 @@ public partial class FortniteReplayAnalyzer : Form
     {
         InitializeMenuStrip();
         Size = new Size(1800, 900);
-        replayBrowserLayout.Padding = new Padding(0, 8, 0, 0);
+
+        replayBrowserLayout.Padding = new Padding(0, 20, 0, 0);
         splitMain.Panel1MinSize = CollapsedReplayPaneWidth;
         splitMain.SplitterWidth = 8;
         splitMain.BackColor = Color.FromArgb(184, 194, 208);
@@ -248,6 +249,8 @@ public partial class FortniteReplayAnalyzer : Form
             Padding = new Point(14, 4)
         };
         _openedReplayTabs.SelectedIndexChanged += async (_, _) => await HandleReplayTabSelectionChangedAsync();
+
+        splitMain.Panel2.Padding = new Padding(0, 25,0, 0);
 
         splitMain.Panel2.Controls.Clear();
         splitMain.Panel2.Controls.Add(_openedReplayTabs);
