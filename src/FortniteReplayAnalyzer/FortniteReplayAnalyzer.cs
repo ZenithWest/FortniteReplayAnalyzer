@@ -24,6 +24,7 @@ public partial class FortniteReplayAnalyzer : Form
     private string _playerSortColumn = nameof(PlayerSummaryRow.Kills);
     private bool _playerSortAscending;
     private bool _isReplayPaneCollapsed;
+    private bool _suppressReplaySelectionChanged;
 
     private ReplayBrowserRow? _selectedReplayRow;
     private PlayerData? _selectedPlayer;
@@ -187,9 +188,12 @@ public partial class FortniteReplayAnalyzer : Form
 
         if (_replayRows.Count > 0 && dgvReplayBrowser.Rows.Count > 0)
         {
+            _suppressReplaySelectionChanged = true;
             dgvReplayBrowser.ClearSelection();
             dgvReplayBrowser.Rows[0].Selected = true;
             dgvReplayBrowser.CurrentCell = dgvReplayBrowser.Rows[0].Cells[0];
+            _selectedReplayRow = dgvReplayBrowser.Rows[0].DataBoundItem as ReplayBrowserRow;
+            _suppressReplaySelectionChanged = false;
         }
 
         await LoadReplaySummariesAsync();
@@ -199,7 +203,7 @@ public partial class FortniteReplayAnalyzer : Form
     {
         foreach (var row in _replayRows.Where(r => !r.SummaryLoaded && !r.IsLoading).ToList())
         {
-            await LoadReplayRowAsync(row, updateSelectionView: row == _selectedReplayRow);
+            await LoadReplayRowAsync(row, ParseMode.Normal, updateSelectionView: row == _selectedReplayRow);
         }
 
         lblReplayStatus.Text = _replayRows.Count == 0
@@ -209,7 +213,7 @@ public partial class FortniteReplayAnalyzer : Form
 
     private async Task HandleReplaySelectionChangedAsync()
     {
-        if (dgvReplayBrowser.CurrentRow?.DataBoundItem is not ReplayBrowserRow row)
+        if (_suppressReplaySelectionChanged || dgvReplayBrowser.CurrentRow?.DataBoundItem is not ReplayBrowserRow row)
         {
             return;
         }
@@ -221,16 +225,17 @@ public partial class FortniteReplayAnalyzer : Form
             SetReplayPaneCollapsed(true);
         }
 
-        if (row.Replay is null && !row.IsLoading)
+        var requiredMode = ParseMode.Full;
+        if (row.Replay is null || row.LoadedParseMode < requiredMode)
         {
-            await LoadReplayRowAsync(row, updateSelectionView: true);
+            await LoadReplayRowAsync(row, requiredMode, updateSelectionView: true);
             return;
         }
 
         DisplayReplay(row);
     }
 
-    private async Task LoadReplayRowAsync(ReplayBrowserRow row, bool updateSelectionView)
+    private async Task LoadReplayRowAsync(ReplayBrowserRow row, ParseMode parseMode, bool updateSelectionView)
     {
         if (row.IsLoading)
         {
@@ -238,21 +243,22 @@ public partial class FortniteReplayAnalyzer : Form
         }
 
         row.IsLoading = true;
-        row.Status = "Loading...";
+        row.Status = parseMode == ParseMode.Full ? "Loading full replay..." : "Loading summary...";
         BindReplayRows();
 
         try
         {
-            var replay = await Task.Run(() => new ReplayReader(parseMode: ParseMode.Normal).ReadReplay(row.FilePath));
+            var replay = await Task.Run(() => new ReplayReader(parseMode: parseMode).ReadReplay(row.FilePath));
             ApplyReplaySummary(row, replay);
             row.Replay = replay;
-            row.Status = "Ready";
+            row.Status = parseMode == ParseMode.Full ? $"Ready ({replay.DamageEvents.Count} hits)" : "Ready";
             row.SummaryLoaded = true;
+            row.LoadedParseMode = parseMode;
         }
         catch (Exception ex)
         {
             row.Replay = null;
-            row.Status = "Error";
+            row.Status = $"Error";
             row.SummaryLoaded = true;
             row.Duration = TimeSpan.Zero;
             row.DurationText = "-";
@@ -284,9 +290,7 @@ public partial class FortniteReplayAnalyzer : Form
     private static void ApplyReplaySummary(ReplayBrowserRow row, FortniteReplay replay)
     {
         var replayOwner = GetReplayOwner(replay);
-        var timestamp = replay.Info.Timestamp != default
-            ? replay.Info.Timestamp.ToLocalTime()
-            : File.GetLastWriteTime(row.FilePath);
+        var timestamp = replay.Info.Timestamp != default ? replay.Info.Timestamp.ToLocalTime() : File.GetLastWriteTime(row.FilePath);
 
         row.RecordedAt = timestamp;
         row.RecordedAtText = timestamp.ToString("g", CultureInfo.CurrentCulture);
@@ -304,9 +308,7 @@ public partial class FortniteReplayAnalyzer : Form
     {
         if (row.Replay is null)
         {
-            lblReplayStatus.Text = row.Status == "Error"
-                ? $"Unable to parse {row.FileName}."
-                : $"Loading {row.FileName}...";
+            lblReplayStatus.Text = row.Status == "Error" ? $"Unable to parse {row.FileName}." : $"Loading {row.FileName}...";
             ClearReplayDetails(keepReplaySelection: true);
             return;
         }
@@ -318,8 +320,14 @@ public partial class FortniteReplayAnalyzer : Form
         BuildKillFeed(row.Replay);
         BuildPlayerList(row.Replay);
 
-        var defaultPlayer = GetReplayOwner(row.Replay) ?? row.Replay.PlayerData?.OrderBy(p => p.Placement ?? int.MaxValue).FirstOrDefault();
+        var defaultPlayer = ResolveDefaultPlayer(row.Replay);
         ShowPlayerDetails(defaultPlayer);
+    }
+
+    private static PlayerData? ResolveDefaultPlayer(FortniteReplay replay)
+    {
+        return GetReplayOwner(replay)
+            ?? replay.PlayerData?.OrderBy(p => p.Placement ?? int.MaxValue).ThenBy(p => p.Id ?? int.MaxValue).FirstOrDefault();
     }
 
     private IEnumerable<DetailRow> BuildReplayDetails(ReplayBrowserRow row)
@@ -342,7 +350,7 @@ public partial class FortniteReplayAnalyzer : Form
         yield return new DetailRow("Accuracy", replay.Stats is null ? "-" : $"{replay.Stats.Accuracy:0.#}%");
         yield return new DetailRow("Damage To Players", FormatNullable(replay.Stats?.DamageToPlayers));
         yield return new DetailRow("Damage Taken", FormatNullable(replay.Stats?.DamageTaken));
-        yield return new DetailRow("Revives", FormatNullable(replay.Stats?.Revives));
+        yield return new DetailRow("Recorded Hits", replay.DamageEvents.Count.ToString(CultureInfo.CurrentCulture));
     }
 
     private void BuildKillFeed(FortniteReplay replay)
@@ -364,10 +372,10 @@ public partial class FortniteReplayAnalyzer : Form
             Entry = entry,
             TimeValue = timeValue,
             TimeText = FormatMatchClock(timeValue),
-            ActorName = ResolvePlayerName(actorPlayer, entry.FinisherOrDownerName),
+            ActorName = ResolvePlayerName(actorPlayer, entry.FinisherOrDowner, entry.FinisherOrDownerName),
             ActorId = actorPlayer?.Id ?? entry.FinisherOrDowner,
             ActorLookupKey = actorPlayer?.PlayerId ?? entry.FinisherOrDownerName,
-            TargetName = ResolvePlayerName(targetPlayer, entry.PlayerName),
+            TargetName = ResolvePlayerName(targetPlayer, entry.PlayerId, entry.PlayerName),
             TargetId = targetPlayer?.Id ?? entry.PlayerId,
             TargetLookupKey = targetPlayer?.PlayerId ?? entry.PlayerName,
             EventText = GetKillFeedEventText(entry),
@@ -381,7 +389,7 @@ public partial class FortniteReplayAnalyzer : Form
         _playerRows.AddRange(replay.PlayerData.Select(player => new PlayerSummaryRow
         {
             Player = player,
-            DisplayName = ResolvePlayerName(player),
+            DisplayName = ResolvePlayerName(player, player.Id, player.PlayerId),
             Team = player.TeamIndex,
             TeamText = FormatNullable(player.TeamIndex),
             Placement = player.Placement,
@@ -444,8 +452,8 @@ public partial class FortniteReplayAnalyzer : Form
             return;
         }
 
-        lblSelectedPlayer.Text = ResolvePlayerName(player);
-        lblPlayerPanelTitle.Text = $"Player Stats - {ResolvePlayerName(player)}";
+        lblSelectedPlayer.Text = ResolvePlayerName(player, player.Id, player.PlayerId);
+        lblPlayerPanelTitle.Text = $"Player Stats - {ResolvePlayerName(player, player.Id, player.PlayerId)}";
         dgvPlayerOverview.DataSource = BuildPlayerOverview(_selectedReplayRow.Replay, player).ToList();
         dgvPlayerCombatLog.DataSource = BuildPlayerCombatLog(_selectedReplayRow.Replay, player).ToList();
         dgvPlayerVictims.DataSource = BuildPlayerVictimRows(_selectedReplayRow.Replay, player).ToList();
@@ -458,7 +466,10 @@ public partial class FortniteReplayAnalyzer : Form
             .OrderByDescending(entry => entry.ReplicatedWorldTimeSecondsDouble ?? entry.ReplicatedWorldTimeSeconds ?? 0)
             .FirstOrDefault();
 
-        yield return new DetailRow("Name", ResolvePlayerName(player));
+        var hitsGiven = replay.DamageEvents.Count(evt => MatchesPlayer(player, evt.InstigatorId, evt.InstigatorName));
+        var hitsTaken = replay.DamageEvents.Count(evt => MatchesPlayer(player, evt.TargetId, evt.TargetName));
+
+        yield return new DetailRow("Name", ResolvePlayerName(player, player.Id, player.PlayerId));
         yield return new DetailRow("Player Id", player.PlayerId ?? "-");
         yield return new DetailRow("Team", FormatNullable(player.TeamIndex));
         yield return new DetailRow("Placement", FormatNullable(player.Placement));
@@ -476,8 +487,9 @@ public partial class FortniteReplayAnalyzer : Form
         yield return new DetailRow("Glider", player.Cosmetics.Glider ?? "-");
         yield return new DetailRow("Death Cause", FormatNullable(player.DeathCause));
         yield return new DetailRow("Death Time", deathEvent is null ? "-" : FormatMatchClock(deathEvent.ReplicatedWorldTimeSecondsDouble ?? deathEvent.ReplicatedWorldTimeSeconds ?? 0));
-        yield return new DetailRow("Eliminated By", deathEvent is null ? "-" : ResolvePlayerName(FindPlayer(replay, deathEvent.FinisherOrDowner, deathEvent.FinisherOrDownerName), deathEvent.FinisherOrDownerName));
-        yield return new DetailRow("Damage", "Per-player damage is not exposed by the parser yet");
+        yield return new DetailRow("Eliminated By", deathEvent is null ? "-" : ResolvePlayerName(FindPlayer(replay, deathEvent.FinisherOrDowner, deathEvent.FinisherOrDownerName), deathEvent.FinisherOrDowner, deathEvent.FinisherOrDownerName));
+        yield return new DetailRow("Damage Events Given", hitsGiven.ToString(CultureInfo.CurrentCulture));
+        yield return new DetailRow("Damage Events Taken", hitsTaken.ToString(CultureInfo.CurrentCulture));
     }
 
     private IEnumerable<KillFeedRow> BuildPlayerCombatLog(FortniteReplay replay, PlayerData player)
@@ -498,7 +510,7 @@ public partial class FortniteReplayAnalyzer : Form
                 var victim = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
                 return new PlayerVictimRow
                 {
-                    PlayerName = ResolvePlayerName(victim, entry.PlayerName),
+                    PlayerName = ResolvePlayerName(victim, entry.PlayerId, entry.PlayerName),
                     EventText = GetKillFeedEventText(entry),
                     TimeText = FormatMatchClock(entry.ReplicatedWorldTimeSecondsDouble ?? entry.ReplicatedWorldTimeSeconds ?? 0),
                     DistanceText = entry.Distance.HasValue ? $"{entry.Distance.Value:0} m" : "-"
@@ -527,23 +539,31 @@ public partial class FortniteReplayAnalyzer : Form
     private void BindReplayRows()
     {
         var currentPath = _selectedReplayRow?.FilePath;
+        var currentScroll = dgvReplayBrowser.FirstDisplayedScrollingRowIndex;
         var ordered = OrderReplayRows().ToList();
+
+        _suppressReplaySelectionChanged = true;
         dgvReplayBrowser.DataSource = ordered;
 
-        if (currentPath is null)
+        if (currentPath is not null)
         {
-            return;
-        }
-
-        foreach (DataGridViewRow gridRow in dgvReplayBrowser.Rows)
-        {
-            if ((gridRow.DataBoundItem as ReplayBrowserRow)?.FilePath == currentPath)
+            foreach (DataGridViewRow gridRow in dgvReplayBrowser.Rows)
             {
-                gridRow.Selected = true;
-                dgvReplayBrowser.CurrentCell = gridRow.Cells[0];
-                break;
+                if ((gridRow.DataBoundItem as ReplayBrowserRow)?.FilePath == currentPath)
+                {
+                    gridRow.Selected = true;
+                    dgvReplayBrowser.CurrentCell = gridRow.Cells[0];
+                    break;
+                }
             }
         }
+
+        if (currentScroll >= 0 && dgvReplayBrowser.Rows.Count > currentScroll)
+        {
+            dgvReplayBrowser.FirstDisplayedScrollingRowIndex = currentScroll;
+        }
+
+        _suppressReplaySelectionChanged = false;
     }
 
     private void SortReplayRows(string columnName, bool toggle = true)
@@ -575,9 +595,7 @@ public partial class FortniteReplayAnalyzer : Form
             _ => row => row.RecordedAt
         };
 
-        return _replaySortAscending
-            ? _replayRows.OrderBy(selector).ThenBy(row => row.FileName)
-            : _replayRows.OrderByDescending(selector).ThenBy(row => row.FileName);
+        return _replaySortAscending ? _replayRows.OrderBy(selector).ThenBy(row => row.FileName) : _replayRows.OrderByDescending(selector).ThenBy(row => row.FileName);
     }
 
     private void SortPlayerRows(string columnName, bool toggle = true)
@@ -593,6 +611,7 @@ public partial class FortniteReplayAnalyzer : Form
         }
 
         var selectedKey = _selectedPlayer?.PlayerId;
+        var currentScroll = dgvPlayers.FirstDisplayedScrollingRowIndex;
         Func<PlayerSummaryRow, object?> selector = _playerSortColumn switch
         {
             nameof(PlayerSummaryRow.DisplayName) => row => row.DisplayName,
@@ -607,19 +626,22 @@ public partial class FortniteReplayAnalyzer : Form
         var ordered = (_playerSortAscending ? _playerRows.OrderBy(selector).ThenBy(row => row.DisplayName) : _playerRows.OrderByDescending(selector).ThenBy(row => row.DisplayName)).ToList();
         dgvPlayers.DataSource = ordered;
 
-        if (selectedKey is null)
+        if (selectedKey is not null)
         {
-            return;
+            foreach (DataGridViewRow gridRow in dgvPlayers.Rows)
+            {
+                if ((gridRow.DataBoundItem as PlayerSummaryRow)?.Player.PlayerId == selectedKey)
+                {
+                    gridRow.Selected = true;
+                    dgvPlayers.CurrentCell = gridRow.Cells[0];
+                    break;
+                }
+            }
         }
 
-        foreach (DataGridViewRow gridRow in dgvPlayers.Rows)
+        if (currentScroll >= 0 && dgvPlayers.Rows.Count > currentScroll)
         {
-            if ((gridRow.DataBoundItem as PlayerSummaryRow)?.Player.PlayerId == selectedKey)
-            {
-                gridRow.Selected = true;
-                dgvPlayers.CurrentCell = gridRow.Cells[0];
-                break;
-            }
+            dgvPlayers.FirstDisplayedScrollingRowIndex = currentScroll;
         }
     }
 
@@ -646,19 +668,29 @@ public partial class FortniteReplayAnalyzer : Form
             return true;
         }
 
-        return !string.IsNullOrWhiteSpace(playerLookupKey)
-            && string.Equals(player.PlayerId, playerLookupKey, StringComparison.OrdinalIgnoreCase);
+        return !string.IsNullOrWhiteSpace(playerLookupKey) && string.Equals(player.PlayerId, playerLookupKey, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string ResolvePlayerName(PlayerData? player, string? fallback = null)
+    private static string ResolvePlayerName(PlayerData? player, int? numericId, string? fallback = null)
     {
-        if (player is null)
+        if (player is not null)
         {
-            return ShortenIdentifier(fallback);
+            var preferred = player.PlayerName ?? player.PlayerNameCustomOverride ?? player.StreamerModeName;
+            if (!string.IsNullOrWhiteSpace(preferred))
+            {
+                return preferred;
+            }
+
+            numericId ??= player.Id;
+            fallback ??= player.PlayerId;
         }
 
-        var preferred = player.PlayerName ?? player.PlayerNameCustomOverride ?? player.StreamerModeName ?? player.PlayerId;
-        return ShortenIdentifier(preferred);
+        if (numericId.HasValue)
+        {
+            return numericId.Value < 1000 ? $"Anonymous {numericId.Value:000}" : $"Anonymous {numericId.Value}";
+        }
+
+        return ShortenIdentifier(fallback);
     }
 
     private static string ShortenIdentifier(string? value)
@@ -668,20 +700,10 @@ public partial class FortniteReplayAnalyzer : Form
             return "Unknown";
         }
 
-        return value.Length > 18 && !value.Contains(' ', StringComparison.Ordinal)
-            ? value[..8] + "..." + value[^4..]
-            : value;
+        return value.Length > 18 && !value.Contains(' ', StringComparison.Ordinal) ? value[..8] + "..." + value[^4..] : value;
     }
 
-    private static string GetKillFeedEventText(KillFeedEntry entry)
-    {
-        if (entry.IsRevived)
-        {
-            return "Revived";
-        }
-
-        return entry.IsDowned ? "Downed" : "Eliminated";
-    }
+    private static string GetKillFeedEventText(KillFeedEntry entry) => entry.IsRevived ? "Revived" : entry.IsDowned ? "Downed" : "Eliminated";
 
     private static string FormatNullable(object? value)
     {
@@ -695,22 +717,9 @@ public partial class FortniteReplayAnalyzer : Form
         };
     }
 
-    private static string FormatBool(bool? value) => value switch
-    {
-        true => "Yes",
-        false => "No",
-        _ => "-"
-    };
+    private static string FormatBool(bool? value) => value switch { true => "Yes", false => "No", _ => "-" };
 
-    private static string FormatMatchClock(double seconds)
-    {
-        if (seconds <= 0)
-        {
-            return "-";
-        }
-
-        return TimeSpan.FromSeconds(seconds).ToString(@"mm\:ss", CultureInfo.InvariantCulture);
-    }
+    private static string FormatMatchClock(double seconds) => seconds <= 0 ? "-" : TimeSpan.FromSeconds(seconds).ToString(@"mm\:ss", CultureInfo.InvariantCulture);
 
     private static string FormatDuration(TimeSpan duration)
     {

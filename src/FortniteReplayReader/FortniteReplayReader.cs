@@ -1,10 +1,11 @@
-﻿using FortniteReplayReader.Exceptions;
+using FortniteReplayReader.Exceptions;
 using FortniteReplayReader.Extensions;
 using FortniteReplayReader.Models;
 using FortniteReplayReader.Models.Enums;
 using FortniteReplayReader.Models.Events;
 using FortniteReplayReader.Models.NetFieldExports;
 using FortniteReplayReader.Models.NetFieldExports.Weapons;
+using FortniteReplayReader.Models.NetFieldExports.RPC;
 using Microsoft.Extensions.Logging;
 using System;
 using System.IO;
@@ -137,6 +138,9 @@ public class ReplayReader : Unreal.Core.ReplayReader<FortniteReplay>
             //case GameplayCue gameplayCue:
             //    Builder.UpdateGameplayCue(channelIndex, gameplayCue);
             //    break;
+            case BatchedDamageCues damageCues:
+                Builder.UpdateDamageCues(channelIndex, damageCues);
+                break;
             case BaseWeapon weapon:
                 Builder.UpdateWeapon(channelIndex, weapon);
                 break;
@@ -381,3 +385,7 @@ public class ReplayReader : Unreal.Core.ReplayReader<FortniteReplay>
         };
     }
 }
+
+
+
+

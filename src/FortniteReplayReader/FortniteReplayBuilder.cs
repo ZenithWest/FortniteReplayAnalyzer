@@ -1,6 +1,7 @@
-﻿using FortniteReplayReader.Models;
+using FortniteReplayReader.Models;
 using FortniteReplayReader.Models.NetFieldExports;
 using FortniteReplayReader.Models.NetFieldExports.Weapons;
+using FortniteReplayReader.Models.NetFieldExports.RPC;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
@@ -15,6 +16,7 @@ public class FortniteReplayBuilder
     private readonly GameData GameData = new();
     private readonly MapData MapData = new();
     private readonly List<KillFeedEntry> KillFeed = new();
+    private readonly List<DamageEvent> DamageEvents = new();
 
     private readonly Dictionary<uint, uint> _actorToChannel = new();
     private readonly Dictionary<uint, uint> _channelToActor = new();
@@ -62,6 +64,7 @@ public class FortniteReplayBuilder
         replay.GameData = GameData;
         replay.MapData = MapData;
         replay.KillFeed = KillFeed;
+        replay.DamageEvents = DamageEvents;
         replay.TeamData = _teams.Values;
         replay.PlayerData = _players.Values;
         return replay;
@@ -556,7 +559,7 @@ public class FortniteReplayBuilder
 
     //public void UpdateExplosion(BroadcastExplosion explosion)
     //{
-    //    // ¯\_(ツ)_/¯
+    //    // �\_(?)_/�
     //}
 
     public void UpdatePoiManager(FortPoiManager poiManager)
@@ -571,8 +574,46 @@ public class FortniteReplayBuilder
         // ignore PoiTagContainerTable since it is just a list of all POI...
     }
 
-    //public void UpdateGameplayCue(uint channelIndex, GameplayCue gameplayCue)
-    //{
-    //    // ¯\_(ツ)_/¯
-    //}
+    public void UpdateDamageCues(uint channelIndex, BatchedDamageCues damageCues)
+    {
+        if (damageCues?.bIsValid != true)
+        {
+            return;
+        }
+
+        PlayerData? instigator = null;
+        if (!TryGetPlayerDataFromPawn(channelIndex, out instigator) && _channelToActor.TryGetValue(channelIndex, out var actorId))
+        {
+            TryGetPlayerDataFromActor(actorId, out instigator);
+        }
+
+        PlayerData? target = null;
+        if (damageCues.HitActor.HasValue)
+        {
+            TryGetPlayerDataFromActor(damageCues.HitActor.Value, out target);
+        }
+
+        DamageEvents.Add(new DamageEvent
+        {
+            InstigatorId = instigator?.Id,
+            InstigatorName = instigator?.PlayerName ?? instigator?.PlayerId,
+            InstigatorIsBot = instigator?.IsBot == true,
+            TargetId = target?.Id,
+            TargetName = target?.PlayerName ?? target?.PlayerId,
+            TargetIsBot = target?.IsBot == true,
+            ReplicatedWorldTimeSeconds = ReplicatedWorldTimeSeconds,
+            ReplicatedWorldTimeSecondsDouble = ReplicatedWorldTimeSecondsDouble,
+            Magnitude = damageCues.Magnitude ?? damageCues.NonPlayerMagnitude,
+            IsFatal = damageCues.bIsFatal ?? damageCues.NonPlayerbIsFatal,
+            IsCritical = damageCues.bIsCritical ?? damageCues.NonPlayerbIsCritical,
+            IsShield = damageCues.bIsShield,
+            IsShieldDestroyed = damageCues.bIsShieldDestroyed,
+            IsShieldApplied = damageCues.bIsShieldApplied,
+            IsBallistic = damageCues.bIsBallistic,
+            Location = damageCues.Location ?? damageCues.NonPlayerLocation,
+            Normal = damageCues.Normal ?? damageCues.NonPlayerNormal
+        });
+    }
 }
+
+

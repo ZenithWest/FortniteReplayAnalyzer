@@ -1,4 +1,5 @@
 using FortniteReplayReader.Models;
+using Unreal.Core.Models.Enums;
 
 namespace FortniteReplayAnalyzer;
 
@@ -20,6 +21,7 @@ internal sealed class ReplayBrowserRow
     public string Status { get; set; } = "Queued";
     public bool IsLoading { get; set; }
     public bool SummaryLoaded { get; set; }
+    public ParseMode LoadedParseMode { get; set; } = ParseMode.EventsOnly;
 
     public static ReplayBrowserRow CreateFromFile(string filePath)
     {
