@@ -100,6 +100,9 @@ internal sealed class DetailRow
 internal sealed class PlayerVictimRow
 {
     public required string PlayerName { get; init; }
+    public int? PlayerId { get; init; }
+    public string? PlayerLookupKey { get; init; }
+    public bool IsBot { get; init; }
     public required string EventText { get; init; }
     public required string TimeText { get; init; }
     public required string DistanceText { get; init; }

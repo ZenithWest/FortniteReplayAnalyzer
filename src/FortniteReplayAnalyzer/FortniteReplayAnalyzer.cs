@@ -34,6 +34,8 @@ public partial class FortniteReplayAnalyzer : Form
     private AnalyzerSettings _settings;
     private MenuStrip? _menuStrip;
     private CheckBox? _chkTeamKillFeedOnly;
+    private CheckBox? _chkKillFeedPlayers;
+    private CheckBox? _chkKillFeedBots;
     private CheckBox? _chkTeamDamageOnly;
     private CheckBox? _chkDamagePlayers;
     private CheckBox? _chkDamageBots;
@@ -104,27 +106,31 @@ public partial class FortniteReplayAnalyzer : Form
         lblReplayStatus.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
         _lblReplayHideHint.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
 
-        var killFeedFilterPanel = new Panel
-        {
-            Dock = DockStyle.Fill,
-            Height = 28,
-            Padding = new Padding(4, 0, 0, 0)
-        };
-
-        _chkTeamKillFeedOnly = new CheckBox
-        {
-            AutoSize = true,
-            Text = "Team members only",
-            Location = new Point(0, 1)
-        };
-        _chkTeamKillFeedOnly.CheckedChanged += (_, _) =>
+        var killFeedFilterPanel = CreateFilterFlowPanel();
+        _chkTeamKillFeedOnly = CreateFilterCheckBox("Team members only", (_, _) =>
         {
             if (_selectedReplayRow?.Replay is not null)
             {
                 BuildKillFeed(_selectedReplayRow.Replay);
             }
-        };
+        });
+        _chkKillFeedPlayers = CreateFilterCheckBox("Players", (_, _) =>
+        {
+            if (_selectedReplayRow?.Replay is not null)
+            {
+                BuildKillFeed(_selectedReplayRow.Replay);
+            }
+        }, true);
+        _chkKillFeedBots = CreateFilterCheckBox("Bots", (_, _) =>
+        {
+            if (_selectedReplayRow?.Replay is not null)
+            {
+                BuildKillFeed(_selectedReplayRow.Replay);
+            }
+        }, true);
         killFeedFilterPanel.Controls.Add(_chkTeamKillFeedOnly);
+        killFeedFilterPanel.Controls.Add(_chkKillFeedPlayers);
+        killFeedFilterPanel.Controls.Add(_chkKillFeedBots);
 
         var killFeedLayout = new TableLayoutPanel
         {
@@ -135,7 +141,7 @@ public partial class FortniteReplayAnalyzer : Form
             RowCount = 2
         };
         killFeedLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        killFeedLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
+        killFeedLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         killFeedLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
         grpKillFeed.Controls.Remove(dgvKillFeed);
@@ -347,8 +353,10 @@ public partial class FortniteReplayAnalyzer : Form
 
 
         dgvKillFeed.CellContentClick += (_, e) => HandleKillFeedLinkClick(e);
+        dgvPlayerCombatLog.CellContentClick += (_, e) => HandleKillFeedLinkClick(dgvPlayerCombatLog, e);
         dgvCombatEvents.CellContentClick += (_, e) => HandleCombatEventLinkClick(dgvCombatEvents, e);
         dgvPlayers.CellContentClick += (_, e) => HandlePlayerLinkClick(e);
+        dgvPlayerVictims.CellContentClick += (_, e) => HandlePlayerVictimLinkClick(e);
         dgvPlayers.SelectionChanged += (_, _) => HandlePlayerSelectionChanged();
         dgvPlayers.ColumnHeaderMouseClick += (_, e) => SortPlayerRows(dgvPlayers.Columns[e.ColumnIndex].Name);
     }
@@ -471,7 +479,8 @@ public partial class FortniteReplayAnalyzer : Form
     }
     private void BuildPlayerVictimColumns()
     {
-        dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.PlayerName), HeaderText = "Player", DataPropertyName = nameof(PlayerVictimRow.PlayerName), FillWeight = 170 });
+        dgvPlayerVictims.Columns.Add(new DataGridViewLinkColumn { Name = nameof(PlayerVictimRow.PlayerName), HeaderText = "Player", DataPropertyName = nameof(PlayerVictimRow.PlayerName), FillWeight = 150, TrackVisitedState = false, UseColumnTextForLinkValue = false });
+        dgvPlayerVictims.Columns.Add(new DataGridViewCheckBoxColumn { Name = nameof(PlayerVictimRow.IsBot), HeaderText = "Bot", DataPropertyName = nameof(PlayerVictimRow.IsBot), FillWeight = 45 });
         dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.EventText), HeaderText = "Event", DataPropertyName = nameof(PlayerVictimRow.EventText), FillWeight = 80 });
         dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.TimeText), HeaderText = "Time", DataPropertyName = nameof(PlayerVictimRow.TimeText), FillWeight = 70 });
         dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.DistanceText), HeaderText = "Distance", DataPropertyName = nameof(PlayerVictimRow.DistanceText), FillWeight = 80 });
@@ -770,6 +779,7 @@ public partial class FortniteReplayAnalyzer : Form
     {
         dgvKillFeed.DataSource = replay.KillFeed
             .Where(entry => !(_chkTeamKillFeedOnly?.Checked ?? false) || InvolvesReplayOwnerTeam(replay, entry))
+            .Where(entry => ShouldIncludeKillFeedEntry(replay, entry))
             .Select(entry => CreateKillFeedRow(replay, entry))
             .OrderBy(entry => entry.TimeValue)
             .ToList();
@@ -872,19 +882,37 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void HandleKillFeedLinkClick(DataGridViewCellEventArgs e)
     {
-        if (e.RowIndex < 0 || _selectedReplayRow?.Replay is null || dgvKillFeed.Rows[e.RowIndex].DataBoundItem is not KillFeedRow row)
+        HandleKillFeedLinkClick(dgvKillFeed, e);
+    }
+
+    private void HandleKillFeedLinkClick(DataGridView grid, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || _selectedReplayRow?.Replay is null || grid.Rows[e.RowIndex].DataBoundItem is not KillFeedRow row)
         {
             return;
         }
 
-        if (dgvKillFeed.Columns[e.ColumnIndex].Name == nameof(KillFeedRow.ActorName))
+        if (grid.Columns[e.ColumnIndex].Name == nameof(KillFeedRow.ActorName))
         {
             ShowPlayerDetails(FindPlayer(_selectedReplayRow.Replay, row.ActorId, row.ActorLookupKey));
         }
 
-        if (dgvKillFeed.Columns[e.ColumnIndex].Name == nameof(KillFeedRow.TargetName))
+        if (grid.Columns[e.ColumnIndex].Name == nameof(KillFeedRow.TargetName))
         {
             ShowPlayerDetails(FindPlayer(_selectedReplayRow.Replay, row.TargetId, row.TargetLookupKey));
+        }
+    }
+
+    private void HandlePlayerVictimLinkClick(DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || _selectedReplayRow?.Replay is null || dgvPlayerVictims.Rows[e.RowIndex].DataBoundItem is not PlayerVictimRow row)
+        {
+            return;
+        }
+
+        if (dgvPlayerVictims.Columns[e.ColumnIndex].Name == nameof(PlayerVictimRow.PlayerName))
+        {
+            ShowPlayerDetails(FindPlayer(_selectedReplayRow.Replay, row.PlayerId, row.PlayerLookupKey));
         }
     }
 
@@ -1009,6 +1037,9 @@ public partial class FortniteReplayAnalyzer : Form
                 return new PlayerVictimRow
                 {
                     PlayerName = ResolvePlayerName(victim, entry.PlayerId, entry.PlayerName),
+                    PlayerId = entry.PlayerId,
+                    PlayerLookupKey = victim?.PlayerId ?? entry.PlayerName,
+                    IsBot = victim?.IsBot ?? false,
                     EventText = GetKillFeedEventText(entry),
                     TimeText = FormatMatchClock(GetKillFeedTime(entry)),
                     DistanceText = FormatDistance(entry.Distance)
@@ -1586,6 +1617,27 @@ public partial class FortniteReplayAnalyzer : Form
         return counterpart?.IsBot == true
             ? _chkPlayerKillLogBots?.Checked ?? true
             : _chkPlayerKillLogPlayers?.Checked ?? true;
+    }
+
+    private bool ShouldIncludeKillFeedEntry(FortniteReplay replay, KillFeedEntry entry)
+    {
+        var actor = ResolveKillFeedActorReference(replay, entry).Player;
+        var target = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
+        var playersEnabled = _chkKillFeedPlayers?.Checked ?? true;
+        var botsEnabled = _chkKillFeedBots?.Checked ?? true;
+
+        return IsKillFeedParticipantEnabled(actor, playersEnabled, botsEnabled)
+            || IsKillFeedParticipantEnabled(target, playersEnabled, botsEnabled);
+    }
+
+    private static bool IsKillFeedParticipantEnabled(PlayerData? participant, bool playersEnabled, bool botsEnabled)
+    {
+        if (participant is null)
+        {
+            return playersEnabled || botsEnabled;
+        }
+
+        return participant.IsBot ? botsEnabled : playersEnabled;
     }
 
     private static bool IsDamageCategoryEnabled(DamageParticipantCategory category, CheckBox? players, CheckBox? bots, CheckBox? structures, CheckBox? npcs)
