@@ -77,6 +77,7 @@ internal sealed class CombatEventRow
     public required string TargetName { get; init; }
     public int? TargetId { get; init; }
     public string? TargetLookupKey { get; init; }
+    public required string EventText { get; init; }
     public required string DamageText { get; init; }
     public required string ShieldText { get; init; }
     public required string FatalText { get; init; }
@@ -103,3 +104,4 @@ internal sealed class PlayerVictimRow
     public required string TimeText { get; init; }
     public required string DistanceText { get; init; }
 }
+

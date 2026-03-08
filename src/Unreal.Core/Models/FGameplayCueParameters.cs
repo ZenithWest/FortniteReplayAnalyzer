@@ -1,4 +1,4 @@
-﻿using Unreal.Core.Contracts;
+using Unreal.Core.Contracts;
 
 namespace Unreal.Core.Models;
 
@@ -38,8 +38,7 @@ public class FGameplayCueParameters : IProperty
     /// <summary>
     /// Effect context, contains information about hit result, etc
     /// </summary>
-    //public FGameplayEffectContextHandle EffectContext { get; private set; }
-    public object EffectContext { get; private set; }
+        public FGameplayEffectContextHandle EffectContext { get; private set; }
 
     /// <summary>
     /// The tag name that matched this specific gameplay cue handler
@@ -134,8 +133,8 @@ public class FGameplayCueParameters : IProperty
             // FGameplayEffectContextHandle
             if (reader.ReadBit())
             {
-                var handle = new FGameplayEffectContextHandle();
-                handle.Serialize(reader);
+                EffectContext = new FGameplayEffectContextHandle();
+                EffectContext.Serialize(reader);
             }
         }
         if ((RepBits & (1 << (int) RepFlag.REP_Location)) > 0)
@@ -176,3 +175,4 @@ public class FGameplayCueParameters : IProperty
         }
     }
 }
+

@@ -1,4 +1,4 @@
-﻿using Unreal.Core.Attributes;
+using Unreal.Core.Attributes;
 using Unreal.Core.Contracts;
 using Unreal.Core.Models;
 using Unreal.Core.Models.Enums;
@@ -17,12 +17,13 @@ public abstract class GameplayCue
     public FPredictionKey PredictionKey { get; set; }
 }
 
-[NetFieldExportGroup("/Script/FortniteGame.FortPawn:NetMulticast_InvokeGameplayCueAdded_WithParams", minimalParseMode: ParseMode.Ignore)]
+[NetFieldExportGroup("/Script/FortniteGame.FortPawn:NetMulticast_InvokeGameplayCueAdded_WithParams", minimalParseMode: ParseMode.Full)]
 public class GameplayCueAdded : GameplayCue, INetFieldExportGroup
 {
 }
 
-[NetFieldExportGroup("/Script/FortniteGame.FortPawn:NetMulticast_InvokeGameplayCueExecuted_WithParams", minimalParseMode: ParseMode.Ignore)]
+[NetFieldExportGroup("/Script/FortniteGame.FortPawn:NetMulticast_InvokeGameplayCueExecuted_WithParams", minimalParseMode: ParseMode.Full)]
 public class GameplayCueExecuted : GameplayCue, INetFieldExportGroup
 {
 }
+

@@ -145,6 +145,7 @@ public partial class FortniteReplayAnalyzer : Form
         dgvCombatEvents.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.TimeText), HeaderText = "Time", DataPropertyName = nameof(CombatEventRow.TimeText), FillWeight = 60 });
         dgvCombatEvents.Columns.Add(new DataGridViewLinkColumn { Name = nameof(CombatEventRow.AttackerName), HeaderText = "Attacker", DataPropertyName = nameof(CombatEventRow.AttackerName), FillWeight = 110, TrackVisitedState = false, UseColumnTextForLinkValue = false });
         dgvCombatEvents.Columns.Add(new DataGridViewLinkColumn { Name = nameof(CombatEventRow.TargetName), HeaderText = "Target", DataPropertyName = nameof(CombatEventRow.TargetName), FillWeight = 110, TrackVisitedState = false, UseColumnTextForLinkValue = false });
+        dgvCombatEvents.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.EventText), HeaderText = "Type", DataPropertyName = nameof(CombatEventRow.EventText), FillWeight = 120 });
         dgvCombatEvents.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.DamageText), HeaderText = "Damage", DataPropertyName = nameof(CombatEventRow.DamageText), FillWeight = 70 });
         dgvCombatEvents.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.ShieldText), HeaderText = "Shield", DataPropertyName = nameof(CombatEventRow.ShieldText), FillWeight = 65 });
         dgvCombatEvents.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.FatalText), HeaderText = "Fatal", DataPropertyName = nameof(CombatEventRow.FatalText), FillWeight = 60 });
@@ -418,12 +419,13 @@ public partial class FortniteReplayAnalyzer : Form
         {
             TimeValue = timeValue,
             TimeText = FormatMatchClock(timeValue),
-            AttackerName = ResolvePlayerName(attacker, evt.InstigatorId, evt.InstigatorName),
+            AttackerName = ResolveCombatantName(attacker, evt.InstigatorId, evt.InstigatorName),
             AttackerId = attacker?.Id ?? evt.InstigatorId,
             AttackerLookupKey = attacker?.PlayerId ?? evt.InstigatorName,
-            TargetName = ResolvePlayerName(target, evt.TargetId, evt.TargetName),
+            TargetName = ResolveCombatantName(target, evt.TargetId, evt.TargetName),
             TargetId = target?.Id ?? evt.TargetId,
             TargetLookupKey = target?.PlayerId ?? evt.TargetName,
+            EventText = evt.EventTag ?? evt.EventSource ?? "-",
             DamageText = evt.Magnitude.HasValue ? evt.Magnitude.Value.ToString("0.#", CultureInfo.CurrentCulture) : "-",
             ShieldText = evt.IsShield switch { true => "Yes", false => "No", _ => "-" },
             FatalText = FormatBool(evt.IsFatal),
@@ -791,6 +793,21 @@ public partial class FortniteReplayAnalyzer : Form
         return (null, null, null);
     }
 
+    private static string ResolveCombatantName(PlayerData? player, int? numericId, string? fallback = null)
+    {
+        if (player is not null)
+        {
+            return ResolvePlayerName(player, numericId, fallback);
+        }
+
+        if (numericId.HasValue)
+        {
+            return numericId.Value < 1000 ? $"Anonymous {numericId.Value:000}" : $"Actor {numericId.Value}";
+        }
+
+        return ShortenIdentifier(fallback);
+    }
+
     private static string ResolvePlayerName(PlayerData? player, int? numericId, string? fallback = null)
     {
         if (player is not null)
@@ -875,5 +892,6 @@ public partial class FortniteReplayAnalyzer : Form
         return vector.ToString() ?? "-";
     }
 }
+
 
 

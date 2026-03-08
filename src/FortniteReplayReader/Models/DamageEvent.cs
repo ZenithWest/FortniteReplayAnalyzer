@@ -4,6 +4,8 @@ namespace FortniteReplayReader.Models;
 
 public class DamageEvent
 {
+    public string? EventSource { get; set; }
+    public string? EventTag { get; set; }
     public int? InstigatorId { get; set; }
     public string? InstigatorName { get; set; }
     public bool InstigatorIsBot { get; set; }
@@ -21,4 +23,7 @@ public class DamageEvent
     public bool? IsBallistic { get; set; }
     public FVector? Location { get; set; }
     public FVector? Normal { get; set; }
+    public FVector? TraceStart { get; set; }
+    public FVector? TraceEnd { get; set; }
 }
+

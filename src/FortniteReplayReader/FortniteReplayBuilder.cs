@@ -574,31 +574,116 @@ public class FortniteReplayBuilder
         // ignore PoiTagContainerTable since it is just a list of all POI...
     }
 
+    public void UpdateGameplayCue(uint channelIndex, GameplayCue gameplayCue)
+    {
+        if (gameplayCue?.Parameters is null)
+        {
+            return;
+        }
+
+        var effectContext = gameplayCue.Parameters.EffectContext;
+        var instigatorActor = gameplayCue.Parameters.Instigator > 0
+            ? gameplayCue.Parameters.Instigator
+            : effectContext?.Instigator ?? 0;
+
+        PlayerData? instigator = null;
+        if (instigatorActor > 0)
+        {
+            TryGetPlayerDataFromActor(instigatorActor, out instigator);
+        }
+        else if (!TryGetPlayerDataFromPawn(channelIndex, out instigator) && _channelToActor.TryGetValue(channelIndex, out var actorId))
+        {
+            instigatorActor = actorId;
+            TryGetPlayerDataFromActor(actorId, out instigator);
+        }
+
+        var targetActor = effectContext?.HitResult?.Actor ?? 0;
+        PlayerData? target = null;
+        if (targetActor > 0)
+        {
+            TryGetPlayerDataFromActor(targetActor, out target);
+        }
+
+        var location = effectContext?.HitResult?.ImpactPoint ?? gameplayCue.Parameters.Location ?? effectContext?.WorldOrigin;
+        var normal = effectContext?.HitResult?.ImpactNormal ?? gameplayCue.Parameters.Normal;
+        var magnitude = gameplayCue.Parameters.RawMagnitude != 0
+            ? gameplayCue.Parameters.RawMagnitude
+            : gameplayCue.Parameters.NormalizedMagnitude != 0 ? gameplayCue.Parameters.NormalizedMagnitude : (float?) null;
+
+        var hasPayload = instigator is not null
+            || instigatorActor > 0
+            || target is not null
+            || targetActor > 0
+            || magnitude.HasValue
+            || location != null;
+
+        if (!hasPayload)
+        {
+            return;
+        }
+
+        DamageEvents.Add(new DamageEvent
+        {
+            EventSource = "GameplayCue",
+            EventTag = gameplayCue.GameplayCueTag?.TagName,
+            InstigatorId = instigator?.Id ?? (instigatorActor > 0 ? (int?) instigatorActor : null),
+            InstigatorName = instigator?.PlayerName ?? instigator?.PlayerId,
+            InstigatorIsBot = instigator?.IsBot == true,
+            TargetId = target?.Id ?? (targetActor > 0 ? (int?) targetActor : null),
+            TargetName = target?.PlayerName ?? target?.PlayerId,
+            TargetIsBot = target?.IsBot == true,
+            ReplicatedWorldTimeSeconds = ReplicatedWorldTimeSeconds,
+            ReplicatedWorldTimeSecondsDouble = ReplicatedWorldTimeSecondsDouble,
+            Magnitude = magnitude,
+            Location = location,
+            Normal = normal,
+            TraceStart = effectContext?.HitResult?.TraceStart,
+            TraceEnd = effectContext?.HitResult?.TraceEnd
+        });
+    }
+
     public void UpdateDamageCues(uint channelIndex, BatchedDamageCues damageCues)
     {
-        if (damageCues?.bIsValid != true)
+        if (damageCues is null)
+        {
+            return;
+        }
+
+        var hasPayload = damageCues.bIsValid == true
+            || damageCues.HitActor.HasValue
+            || damageCues.NonPlayerHitActor.HasValue
+            || damageCues.Magnitude.HasValue
+            || damageCues.NonPlayerMagnitude.HasValue
+            || damageCues.Location != null
+            || damageCues.NonPlayerLocation != null;
+
+        if (!hasPayload)
         {
             return;
         }
 
         PlayerData? instigator = null;
+        uint? instigatorActor = null;
         if (!TryGetPlayerDataFromPawn(channelIndex, out instigator) && _channelToActor.TryGetValue(channelIndex, out var actorId))
         {
+            instigatorActor = actorId;
             TryGetPlayerDataFromActor(actorId, out instigator);
         }
 
+        var targetActor = damageCues.HitActor ?? damageCues.NonPlayerHitActor;
         PlayerData? target = null;
-        if (damageCues.HitActor.HasValue)
+        if (targetActor.HasValue)
         {
-            TryGetPlayerDataFromActor(damageCues.HitActor.Value, out target);
+            TryGetPlayerDataFromActor(targetActor.Value, out target);
         }
 
         DamageEvents.Add(new DamageEvent
         {
-            InstigatorId = instigator?.Id,
+            EventSource = "DamageCue",
+            InstigatorId = instigator?.Id ?? (instigatorActor.HasValue ? (int?) instigatorActor.Value : null),
             InstigatorName = instigator?.PlayerName ?? instigator?.PlayerId,
             InstigatorIsBot = instigator?.IsBot == true,
-            TargetId = target?.Id,
+            TargetId = target?.Id ?? (targetActor.HasValue ? (int?) targetActor.Value : null),
             TargetName = target?.PlayerName ?? target?.PlayerId,
             TargetIsBot = target?.IsBot == true,
             ReplicatedWorldTimeSeconds = ReplicatedWorldTimeSeconds,
@@ -615,6 +700,3 @@ public class FortniteReplayBuilder
         });
     }
 }
-
-
-
