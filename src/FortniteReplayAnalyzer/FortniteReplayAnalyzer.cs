@@ -66,6 +66,7 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void InitializeDynamicUi()
     {
+        InitializeMenuStrip();
         Size = new Size(1800, 900);
         splitMain.Panel1MinSize = CollapsedReplayPaneWidth;
         splitMain.SplitterWidth = 8;
@@ -277,6 +278,7 @@ public partial class FortniteReplayAnalyzer : Form
         Controls.Add(_menuStrip);
         MainMenuStrip = _menuStrip;
         Controls.SetChildIndex(_menuStrip, 0);
+        _menuStrip.BringToFront();
     }
 
     private static FlowLayoutPanel CreateFilterFlowPanel()
