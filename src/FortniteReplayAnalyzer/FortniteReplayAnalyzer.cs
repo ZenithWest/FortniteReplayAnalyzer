@@ -34,7 +34,9 @@ public partial class FortniteReplayAnalyzer : Form
     private GroupBox? _grpPlayerDamageLog;
     private DataGridView? _dgvPlayerDamageLog;
     private TabControl? _openedReplayTabs;
+    private Label? _lblReplayHideHint;
     private bool _suppressReplayTabSelection;
+    private int _lastExpandedReplayPaneWidth = ExpandedReplayPaneWidth;
 
     public FortniteReplayAnalyzer()
     {
@@ -62,10 +64,22 @@ public partial class FortniteReplayAnalyzer : Form
         replayBrowserHeader.Cursor = Cursors.Hand;
         lblReplayHeader.Cursor = Cursors.Hand;
         lblReplayStatus.Cursor = Cursors.Hand;
+
+        _lblReplayHideHint = new Label
+        {
+            AutoSize = true,
+            Font = new Font("Segoe UI", 8.5F, FontStyle.Regular),
+            ForeColor = Color.FromArgb(73, 82, 95),
+            Text = "(Click to Hide)",
+            Cursor = Cursors.Hand
+        };
+        replayBrowserHeader.Controls.Add(_lblReplayHideHint);
+        _lblReplayHideHint.BringToFront();
+
         replayBrowserHeader.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
         lblReplayHeader.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
         lblReplayStatus.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
-        lblReplayStatus.Text = "(Click to Hide)";
+        _lblReplayHideHint.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
 
         var damageFilterPanel = new Panel
         {
@@ -135,6 +149,8 @@ public partial class FortniteReplayAnalyzer : Form
 
         splitMain.Panel2.Controls.Clear();
         splitMain.Panel2.Controls.Add(_openedReplayTabs);
+        splitMain.SplitterDistance = ExpandedReplayPaneWidth;
+        UpdateReplayBrowserHeaderChrome();
     }
     private void WireEvents()
     {
@@ -948,16 +964,39 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void SetReplayPaneCollapsed(bool collapsed)
     {
+        if (collapsed && !_isReplayPaneCollapsed)
+        {
+            _lastExpandedReplayPaneWidth = Math.Max(ExpandedReplayPaneWidth, splitMain.SplitterDistance);
+        }
+
         _isReplayPaneCollapsed = collapsed;
         dgvReplayBrowser.Visible = !collapsed;
         lblReplayStatus.Visible = !collapsed;
         lblReplayHeader.AutoSize = !collapsed;
         lblReplayHeader.Text = collapsed ? string.Join(Environment.NewLine, "Replays".ToCharArray()) : "Replay Browser";
         lblReplayHeader.Location = collapsed ? new Point(14, 8) : new Point(12, 10);
-        lblReplayStatus.Text = collapsed ? string.Empty : "(Click to Hide)";
-        splitMain.SplitterDistance = collapsed ? CollapsedReplayPaneWidth : ExpandedReplayPaneWidth;
+        splitMain.SplitterDistance = collapsed ? CollapsedReplayPaneWidth : _lastExpandedReplayPaneWidth;
+        UpdateReplayBrowserHeaderChrome();
     }
 
+
+    private void UpdateReplayBrowserHeaderChrome()
+    {
+        if (_lblReplayHideHint is null)
+        {
+            return;
+        }
+
+        _lblReplayHideHint.Visible = !_isReplayPaneCollapsed;
+        if (_isReplayPaneCollapsed)
+        {
+            return;
+        }
+
+        _lblReplayHideHint.Location = new Point(lblReplayHeader.Right + 8, lblReplayHeader.Top + 5);
+        lblReplayStatus.Location = new Point(12, 42);
+        lblReplayStatus.Size = new Size(replayBrowserHeader.ClientSize.Width - 24, 22);
+    }
     private static PlayerData? GetReplayOwner(FortniteReplay replay) => replay.PlayerData?.FirstOrDefault(player => player.IsReplayOwner);
 
     private static PlayerData? FindPlayer(FortniteReplay replay, int? playerId, string? playerLookupKey)
@@ -1366,6 +1405,7 @@ public partial class FortniteReplayAnalyzer : Form
 
     private sealed record ReplayLoadResult(FortniteReplay? Replay, Exception? Exception);
 }
+
 
 
 
