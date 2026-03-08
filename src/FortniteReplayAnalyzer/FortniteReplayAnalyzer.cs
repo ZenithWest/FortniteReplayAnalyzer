@@ -30,10 +30,13 @@ public partial class FortniteReplayAnalyzer : Form
 
     private ReplayBrowserRow? _selectedReplayRow;
     private PlayerData? _selectedPlayer;
+    private CheckBox? _chkTeamKillFeedOnly;
     private CheckBox? _chkTeamDamageOnly;
     private GroupBox? _grpPlayerDamageLog;
     private DataGridView? _dgvPlayerDamageLog;
     private TabControl? _openedReplayTabs;
+    private TabControl? _centerPanelTabs;
+    private TabControl? _playerPanelTabs;
     private Label? _lblReplayHideHint;
     private bool _suppressReplayTabSelection;
     private int _lastExpandedReplayPaneWidth = ExpandedReplayPaneWidth;
@@ -80,6 +83,45 @@ public partial class FortniteReplayAnalyzer : Form
         lblReplayHeader.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
         lblReplayStatus.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
         _lblReplayHideHint.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
+
+        var killFeedFilterPanel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            Height = 28,
+            Padding = new Padding(4, 0, 0, 0)
+        };
+
+        _chkTeamKillFeedOnly = new CheckBox
+        {
+            AutoSize = true,
+            Text = "Team members only",
+            Location = new Point(0, 1)
+        };
+        _chkTeamKillFeedOnly.CheckedChanged += (_, _) =>
+        {
+            if (_selectedReplayRow?.Replay is not null)
+            {
+                BuildKillFeed(_selectedReplayRow.Replay);
+            }
+        };
+        killFeedFilterPanel.Controls.Add(_chkTeamKillFeedOnly);
+
+        var killFeedLayout = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            RowCount = 2
+        };
+        killFeedLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        killFeedLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
+        killFeedLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+        grpKillFeed.Controls.Remove(dgvKillFeed);
+        killFeedLayout.Controls.Add(killFeedFilterPanel, 0, 0);
+        killFeedLayout.Controls.Add(dgvKillFeed, 0, 1);
+        grpKillFeed.Controls.Add(killFeedLayout);
 
         var damageFilterPanel = new Panel
         {
@@ -137,6 +179,39 @@ public partial class FortniteReplayAnalyzer : Form
 
         playerContentLayout.SetColumnSpan(grpPlayerVictims, 1);
         playerContentLayout.Controls.Add(_grpPlayerDamageLog, 1, 1);
+
+        _centerPanelTabs = new TabControl
+        {
+            Dock = DockStyle.Fill,
+            HotTrack = true,
+            Multiline = false,
+            Padding = new Point(14, 4)
+        };
+        centerLayout.Parent?.Controls.Remove(centerLayout);
+        splitContent.Panel1.Controls.Clear();
+        splitContent.Panel1.Controls.Add(_centerPanelTabs);
+        AddPanelTab(_centerPanelTabs, "Game Stats", grpGameStats);
+        AddPanelTab(_centerPanelTabs, "Kill Feed", grpKillFeed);
+        AddPanelTab(_centerPanelTabs, "Damage Events", grpCombatEvents);
+        AddPanelTab(_centerPanelTabs, "Player List", grpPlayers);
+
+        _playerPanelTabs = new TabControl
+        {
+            Dock = DockStyle.Fill,
+            HotTrack = true,
+            Multiline = false,
+            Padding = new Point(14, 4)
+        };
+        playerContentLayout.Parent?.Controls.Remove(playerContentLayout);
+        playerPanelLayout.Controls.Remove(playerContentLayout);
+        playerPanelLayout.Controls.Add(_playerPanelTabs, 0, 1);
+        AddPanelTab(_playerPanelTabs, "Overview", grpPlayerOverview);
+        AddPanelTab(_playerPanelTabs, "Kill Log", grpPlayerCombatLog);
+        AddPanelTab(_playerPanelTabs, "Eliminated Players", grpPlayerVictims);
+        if (_grpPlayerDamageLog is not null)
+        {
+            AddPanelTab(_playerPanelTabs, "Damage Log", _grpPlayerDamageLog);
+        }
 
         _openedReplayTabs = new TabControl
         {
@@ -586,6 +661,7 @@ public partial class FortniteReplayAnalyzer : Form
     private void BuildKillFeed(FortniteReplay replay)
     {
         dgvKillFeed.DataSource = replay.KillFeed
+            .Where(entry => !(_chkTeamKillFeedOnly?.Checked ?? false) || InvolvesReplayOwnerTeam(replay, entry))
             .Select(entry => CreateKillFeedRow(replay, entry))
             .OrderBy(entry => entry.TimeValue)
             .ToList();
@@ -1233,6 +1309,28 @@ public partial class FortniteReplayAnalyzer : Form
         }
     }
 
+
+    private static void AddPanelTab(TabControl tabControl, string title, Control content)
+    {
+        var page = new TabPage(title);
+        content.Parent?.Controls.Remove(content);
+        page.Controls.Add(content);
+        content.Dock = DockStyle.Fill;
+        tabControl.TabPages.Add(page);
+    }
+
+    private static bool InvolvesReplayOwnerTeam(FortniteReplay replay, KillFeedEntry entry)
+    {
+        var teamIndex = GetReplayOwner(replay)?.TeamIndex;
+        if (!teamIndex.HasValue)
+        {
+            return true;
+        }
+
+        var actorReference = ResolveKillFeedActorReference(replay, entry);
+        var target = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
+        return actorReference.Player?.TeamIndex == teamIndex || target?.TeamIndex == teamIndex;
+    }
     private static bool InvolvesReplayOwnerTeam(FortniteReplay replay, DamageEvent evt)
     {
         var teamIndex = GetReplayOwner(replay)?.TeamIndex;
@@ -1405,6 +1503,7 @@ public partial class FortniteReplayAnalyzer : Form
 
     private sealed record ReplayLoadResult(FortniteReplay? Replay, Exception? Exception);
 }
+
 
 
 
