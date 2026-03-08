@@ -152,7 +152,6 @@ public partial class FortniteReplayAnalyzer : Form
         damageFilterPanel.Controls.Add(_chkDamageNpcs);
 
         damageFilterPanel.Dock = DockStyle.Top;
-        damageFilterPanel.Height = 34;
         damageFilterPanel.BackColor = SystemColors.Control;
 
         grpCombatEvents.Controls.Clear();
@@ -191,7 +190,7 @@ public partial class FortniteReplayAnalyzer : Form
             RowCount = 2
         };
         playerDamageLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        playerDamageLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+        playerDamageLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         playerDamageLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         playerDamageLayout.Controls.Add(playerDamageFilterPanel, 0, 0);
         playerDamageLayout.Controls.Add(_dgvPlayerDamageLog, 0, 1);
@@ -298,11 +297,13 @@ public partial class FortniteReplayAnalyzer : Form
         return new FlowLayoutPanel
         {
             AutoScroll = true,
-            AutoSize = false,
-            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top,
             FlowDirection = FlowDirection.LeftToRight,
-            Padding = new Padding(4, 2, 4, 0),
-            WrapContents = false
+            Margin = new Padding(0, 0, 0, 6),
+            Padding = new Padding(4, 4, 4, 8),
+            WrapContents = true
         };
     }
 
