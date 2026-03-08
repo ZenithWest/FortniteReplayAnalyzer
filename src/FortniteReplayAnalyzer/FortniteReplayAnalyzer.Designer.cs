@@ -19,6 +19,7 @@ partial class FortniteReplayAnalyzer
     private void InitializeComponent()
     {
         components = new System.ComponentModel.Container();
+        mainContentHost = new Panel();
         splitMain = new SplitContainer();
         replayBrowserLayout = new TableLayoutPanel();
         replayBrowserHeader = new Panel();
@@ -48,6 +49,7 @@ partial class FortniteReplayAnalyzer
         dgvPlayerCombatLog = new DataGridView();
         grpPlayerVictims = new GroupBox();
         dgvPlayerVictims = new DataGridView();
+        mainContentHost.SuspendLayout();
         ((System.ComponentModel.ISupportInitialize)splitMain).BeginInit();
         splitMain.Panel1.SuspendLayout();
         splitMain.Panel2.SuspendLayout();
@@ -78,6 +80,16 @@ partial class FortniteReplayAnalyzer
         grpPlayerVictims.SuspendLayout();
         ((System.ComponentModel.ISupportInitialize)dgvPlayerVictims).BeginInit();
         SuspendLayout();
+        // 
+        // 
+        // mainContentHost
+        // 
+        mainContentHost.Controls.Add(splitMain);
+        mainContentHost.Dock = DockStyle.Fill;
+        mainContentHost.Location = new Point(0, 0);
+        mainContentHost.Name = "mainContentHost";
+        mainContentHost.Size = new Size(1680, 980);
+        mainContentHost.TabIndex = 1;
         // 
         // splitMain
         // 
@@ -436,11 +448,12 @@ partial class FortniteReplayAnalyzer
         AutoScaleDimensions = new SizeF(8F, 20F);
         AutoScaleMode = AutoScaleMode.Font;
         ClientSize = new Size(1680, 980);
-        Controls.Add(splitMain);
+        Controls.Add(mainContentHost);
         MinimumSize = new Size(1400, 820);
         Name = "FortniteReplayAnalyzer";
         StartPosition = FormStartPosition.CenterScreen;
         Text = "Fortnite Replay Analyzer";
+        mainContentHost.ResumeLayout(false);
         splitMain.Panel1.ResumeLayout(false);
         splitMain.Panel2.ResumeLayout(false);
         ((System.ComponentModel.ISupportInitialize)splitMain).EndInit();
@@ -477,6 +490,7 @@ partial class FortniteReplayAnalyzer
 
     #endregion
 
+    private Panel mainContentHost;
     private SplitContainer splitMain;
     private TableLayoutPanel replayBrowserLayout;
     private Panel replayBrowserHeader;

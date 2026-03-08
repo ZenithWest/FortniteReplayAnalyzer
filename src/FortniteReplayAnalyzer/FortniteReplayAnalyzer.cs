@@ -279,7 +279,8 @@ public partial class FortniteReplayAnalyzer : Form
         MainMenuStrip = _menuStrip;
         Controls.SetChildIndex(_menuStrip, 0);
         _menuStrip.BringToFront();
-        splitMain.Dock = DockStyle.Fill;
+        mainContentHost.Dock = DockStyle.None;
+        mainContentHost.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
     }
 
     private void LayoutContentBelowMenu()
@@ -290,7 +291,10 @@ public partial class FortniteReplayAnalyzer : Form
         }
 
         _menuStrip.Dock = DockStyle.Top;
-        splitMain.Dock = DockStyle.Fill;
+        var top = _menuStrip.Bottom;
+        mainContentHost.Dock = DockStyle.None;
+        mainContentHost.Location = new Point(0, top);
+        mainContentHost.Size = new Size(ClientSize.Width, Math.Max(0, ClientSize.Height - top));
         _menuStrip.BringToFront();
     }
 
