@@ -1,6 +1,7 @@
 using FortniteReplayReader;
 using FortniteReplayReader.Models;
 using System.Globalization;
+using Unreal.Core.Exceptions;
 using Unreal.Core.Models.Enums;
 
 namespace FortniteReplayAnalyzer;
@@ -34,6 +35,7 @@ public partial class FortniteReplayAnalyzer : Form
         InitializeComponent();
         ConfigureGrids();
         WireEvents();
+        DebugOutputWriter.LogInfo("Fortnite Replay Analyzer started.");
     }
 
     private void WireEvents()
@@ -214,6 +216,11 @@ public partial class FortniteReplayAnalyzer : Form
         }
 
         await LoadReplaySummariesAsync();
+
+        if (_selectedReplayRow is not null)
+        {
+            await EnsureReplayLoadedAsync(_selectedReplayRow, ParseMode.Full, updateSelectionView: true);
+        }
     }
 
     private async Task LoadReplaySummariesAsync()
@@ -245,11 +252,31 @@ public partial class FortniteReplayAnalyzer : Form
         var requiredMode = ParseMode.Full;
         if (row.Replay is null || row.LoadedParseMode < requiredMode)
         {
-            await LoadReplayRowAsync(row, requiredMode, updateSelectionView: true);
+            await EnsureReplayLoadedAsync(row, requiredMode, updateSelectionView: true);
             return;
         }
 
         DisplayReplay(row);
+    }
+
+    private async Task EnsureReplayLoadedAsync(ReplayBrowserRow row, ParseMode parseMode, bool updateSelectionView)
+    {
+        while (row.IsLoading)
+        {
+            await Task.Delay(50);
+        }
+
+        if (row.Replay is not null && row.LoadedParseMode >= parseMode)
+        {
+            if (updateSelectionView && row == _selectedReplayRow)
+            {
+                DisplayReplay(row);
+            }
+
+            return;
+        }
+
+        await LoadReplayRowAsync(row, parseMode, updateSelectionView);
     }
 
     private async Task LoadReplayRowAsync(ReplayBrowserRow row, ParseMode parseMode, bool updateSelectionView)
@@ -262,6 +289,7 @@ public partial class FortniteReplayAnalyzer : Form
         row.IsLoading = true;
         row.Status = parseMode == ParseMode.Full ? "Loading full replay..." : "Loading summary...";
         BindReplayRows();
+        DebugOutputWriter.LogInfo($"Parsing replay '{row.FileName}' with mode {parseMode}.");
 
         try
         {
@@ -271,26 +299,25 @@ public partial class FortniteReplayAnalyzer : Form
             row.Status = parseMode == ParseMode.Full ? $"Ready ({replay.DamageEvents.Count} hits)" : "Ready";
             row.SummaryLoaded = true;
             row.LoadedParseMode = parseMode;
+
+            DebugOutputWriter.LogInfo($"Parsed replay '{row.FileName}' successfully in mode {parseMode}. KillFeed={replay.KillFeed.Count}, DamageEvents={replay.DamageEvents.Count}.");
+            DebugOutputWriter.WriteReplaySnapshot(row.FilePath, new
+            {
+                FileName = row.FileName,
+                FilePath = row.FilePath,
+                ParseMode = parseMode.ToString(),
+                Status = row.Status,
+                ParsedAt = DateTime.Now,
+                Replay = replay
+            });
+        }
+        catch (InvalidReplayException ex)
+        {
+            ApplyReplayFailure(row, "Skipped", ex, parseMode, updateSelectionView);
         }
         catch (Exception ex)
         {
-            row.Replay = null;
-            row.Status = "Error";
-            row.SummaryLoaded = true;
-            row.Duration = TimeSpan.Zero;
-            row.DurationText = "-";
-            row.Placement = null;
-            row.PlacementText = "-";
-            row.Kills = null;
-            row.KillsText = "-";
-            row.PlayerCount = 0;
-            row.PlayerCountText = "-";
-
-            if (updateSelectionView)
-            {
-                lblReplayStatus.Text = $"Unable to parse {row.FileName}: {ex.Message}";
-                ClearReplayDetails(keepReplaySelection: true);
-            }
+            ApplyReplayFailure(row, "Error", ex, parseMode, updateSelectionView);
         }
         finally
         {
@@ -301,6 +328,38 @@ public partial class FortniteReplayAnalyzer : Form
             {
                 DisplayReplay(row);
             }
+        }
+    }
+
+    private void ApplyReplayFailure(ReplayBrowserRow row, string status, Exception ex, ParseMode parseMode, bool updateSelectionView)
+    {
+        row.Replay = null;
+        row.Status = status;
+        row.SummaryLoaded = true;
+        row.Duration = TimeSpan.Zero;
+        row.DurationText = "-";
+        row.Placement = null;
+        row.PlacementText = "-";
+        row.Kills = null;
+        row.KillsText = "-";
+        row.PlayerCount = 0;
+        row.PlayerCountText = "-";
+
+        DebugOutputWriter.LogError($"Failed to parse replay '{row.FileName}' in mode {parseMode}. Marked as {status}.", ex);
+        DebugOutputWriter.WriteReplaySnapshot(row.FilePath, new
+        {
+            FileName = row.FileName,
+            FilePath = row.FilePath,
+            ParseMode = parseMode.ToString(),
+            Status = status,
+            FailedAt = DateTime.Now,
+            Error = ex.ToString()
+        });
+
+        if (updateSelectionView)
+        {
+            lblReplayStatus.Text = $"{status} {row.FileName}: {ex.Message}";
+            ClearReplayDetails(keepReplaySelection: true);
         }
     }
 
@@ -892,6 +951,9 @@ public partial class FortniteReplayAnalyzer : Form
         return vector.ToString() ?? "-";
     }
 }
+
+
+
 
 
 
