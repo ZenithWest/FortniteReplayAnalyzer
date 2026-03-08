@@ -8,7 +8,7 @@ namespace FortniteReplayAnalyzer;
 
 public partial class FortniteReplayAnalyzer : Form
 {
-    private const int ExpandedReplayPaneWidth = 360;
+    private const int ExpandedReplayPaneWidth = 720;
     private const int CollapsedReplayPaneWidth = 52;
 
     private readonly string _replayFolder = Path.Combine(
@@ -50,13 +50,22 @@ public partial class FortniteReplayAnalyzer : Form
     {
         Size = new Size(1800, 900);
         splitMain.Panel1MinSize = CollapsedReplayPaneWidth;
+        splitMain.SplitterWidth = 8;
+        splitMain.BackColor = Color.FromArgb(184, 194, 208);
+        splitContent.SplitterWidth = 8;
+        splitContent.BackColor = Color.FromArgb(184, 194, 208);
         grpCombatEvents.Text = "Damage Events";
         grpPlayerCombatLog.Text = "Kill Log";
 
         btnToggleReplayPane.Visible = false;
         btnRefreshReplays.Visible = false;
+        replayBrowserHeader.Cursor = Cursors.Hand;
         lblReplayHeader.Cursor = Cursors.Hand;
+        lblReplayStatus.Cursor = Cursors.Hand;
+        replayBrowserHeader.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
         lblReplayHeader.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
+        lblReplayStatus.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
+        lblReplayStatus.Text = "(Click to Hide)";
 
         var damageFilterPanel = new Panel
         {
@@ -942,7 +951,10 @@ public partial class FortniteReplayAnalyzer : Form
         _isReplayPaneCollapsed = collapsed;
         dgvReplayBrowser.Visible = !collapsed;
         lblReplayStatus.Visible = !collapsed;
-        lblReplayHeader.Text = collapsed ? "Replays" : "Replay Browser";
+        lblReplayHeader.AutoSize = !collapsed;
+        lblReplayHeader.Text = collapsed ? string.Join(Environment.NewLine, "Replays".ToCharArray()) : "Replay Browser";
+        lblReplayHeader.Location = collapsed ? new Point(14, 8) : new Point(12, 10);
+        lblReplayStatus.Text = collapsed ? string.Empty : "(Click to Hide)";
         splitMain.SplitterDistance = collapsed ? CollapsedReplayPaneWidth : ExpandedReplayPaneWidth;
     }
 
@@ -1124,8 +1136,13 @@ public partial class FortniteReplayAnalyzer : Form
 
     private static string ShortenTabTitle(string fileName)
     {
-        const int maxLength = 34;
-        return fileName.Length <= maxLength ? fileName : fileName[..31] + "...";
+        if (TryParseReplayTimestampFromFileName(fileName, out DateTime timestamp))
+        {
+            return timestamp.ToString("M/d h:mm tt", CultureInfo.CurrentCulture);
+        }
+
+        const int maxLength = 20;
+        return fileName.Length <= maxLength ? fileName : fileName[..17] + "...";
     }
     private static DateTime GetReplayTimestamp(DateTime replayTimestamp, string filePath, string? fileName = null)
     {
@@ -1349,6 +1366,9 @@ public partial class FortniteReplayAnalyzer : Form
 
     private sealed record ReplayLoadResult(FortniteReplay? Replay, Exception? Exception);
 }
+
+
+
 
 
 
