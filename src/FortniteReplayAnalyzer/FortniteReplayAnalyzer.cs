@@ -11,13 +11,14 @@ public partial class FortniteReplayAnalyzer : Form
     private const int ExpandedReplayPaneWidth = 720;
     private const int CollapsedReplayPaneWidth = 52;
 
-    private readonly string _replayFolder = Path.Combine(
+    private static readonly string DefaultReplayFolder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "FortniteGame",
         "Saved",
         "Demos");
 
     private readonly List<ReplayBrowserRow> _replayRows = [];
+    private readonly HashSet<string> _manuallyAddedReplayPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<PlayerSummaryRow> _playerRows = [];
     private readonly Dictionary<string, int> _replayBrowserColumnWidths = new(StringComparer.Ordinal);
 
@@ -30,8 +31,16 @@ public partial class FortniteReplayAnalyzer : Form
 
     private ReplayBrowserRow? _selectedReplayRow;
     private PlayerData? _selectedPlayer;
+    private AnalyzerSettings _settings;
+    private MenuStrip? _menuStrip;
     private CheckBox? _chkTeamKillFeedOnly;
     private CheckBox? _chkTeamDamageOnly;
+    private CheckBox? _chkDamagePlayers;
+    private CheckBox? _chkDamageStructures;
+    private CheckBox? _chkDamageNpcs;
+    private CheckBox? _chkPlayerDamagePlayers;
+    private CheckBox? _chkPlayerDamageStructures;
+    private CheckBox? _chkPlayerDamageNpcs;
     private GroupBox? _grpPlayerDamageLog;
     private DataGridView? _dgvPlayerDamageLog;
     private TabControl? _openedReplayTabs;
@@ -41,11 +50,15 @@ public partial class FortniteReplayAnalyzer : Form
     private bool _suppressReplayTabSelection;
     private int _lastExpandedReplayPaneWidth = ExpandedReplayPaneWidth;
 
-    public FortniteReplayAnalyzer()
+    private string ReplayFolder => string.IsNullOrWhiteSpace(_settings.DefaultReplaysFolder) ? DefaultReplayFolder : _settings.DefaultReplaysFolder;
+
+    internal FortniteReplayAnalyzer(AnalyzerSettings settings)
     {
+        _settings = settings.Clone();
         InitializeComponent();
         ConfigureGrids();
         InitializeDynamicUi();
+        ApplySettingsToUi();
         WireEvents();
         DebugOutputWriter.LogInfo("Fortnite Replay Analyzer started.");
     }
@@ -123,27 +136,17 @@ public partial class FortniteReplayAnalyzer : Form
         killFeedLayout.Controls.Add(dgvKillFeed, 0, 1);
         grpKillFeed.Controls.Add(killFeedLayout);
 
-        var damageFilterPanel = new Panel
-        {
-            Dock = DockStyle.Fill,
-            Height = 28,
-            Padding = new Padding(4, 0, 0, 0)
-        };
+        var damageFilterPanel = CreateFilterFlowPanel();
 
-        _chkTeamDamageOnly = new CheckBox
-        {
-            AutoSize = true,
-            Text = "Team members only",
-            Location = new Point(0, 1)
-        };
-        _chkTeamDamageOnly.CheckedChanged += (_, _) =>
-        {
-            if (_selectedReplayRow?.Replay is not null)
-            {
-                BuildCombatEvents(_selectedReplayRow.Replay);
-            }
-        };
+        _chkTeamDamageOnly = CreateFilterCheckBox("Team members only", (_, _) => RefreshDamageEventViews());
+        _chkDamagePlayers = CreateFilterCheckBox("Players", (_, _) => RefreshDamageEventViews(), true);
+        _chkDamageStructures = CreateFilterCheckBox("Structure", (_, _) => RefreshDamageEventViews(), true);
+        _chkDamageNpcs = CreateFilterCheckBox("NPC", (_, _) => RefreshDamageEventViews(), true);
+
         damageFilterPanel.Controls.Add(_chkTeamDamageOnly);
+        damageFilterPanel.Controls.Add(_chkDamagePlayers);
+        damageFilterPanel.Controls.Add(_chkDamageStructures);
+        damageFilterPanel.Controls.Add(_chkDamageNpcs);
 
         var damageEventsLayout = new TableLayoutPanel
         {
@@ -170,12 +173,34 @@ public partial class FortniteReplayAnalyzer : Form
             Text = "Damage Log"
         };
 
+        var playerDamageFilterPanel = CreateFilterFlowPanel();
+        _chkPlayerDamagePlayers = CreateFilterCheckBox("Players", (_, _) => RefreshDamageEventViews(), true);
+        _chkPlayerDamageStructures = CreateFilterCheckBox("Structure", (_, _) => RefreshDamageEventViews(), true);
+        _chkPlayerDamageNpcs = CreateFilterCheckBox("NPC", (_, _) => RefreshDamageEventViews(), true);
+        playerDamageFilterPanel.Controls.Add(_chkPlayerDamagePlayers);
+        playerDamageFilterPanel.Controls.Add(_chkPlayerDamageStructures);
+        playerDamageFilterPanel.Controls.Add(_chkPlayerDamageNpcs);
+
         _dgvPlayerDamageLog = new DataGridView { Name = "dgvPlayerDamageLog" };
         ConfigureReadOnlyGrid(_dgvPlayerDamageLog, fullRowSelect: true);
         _dgvPlayerDamageLog.AutoGenerateColumns = false;
         BuildCombatEventColumns(_dgvPlayerDamageLog);
         _dgvPlayerDamageLog.CellContentClick += (_, e) => HandleCombatEventLinkClick(_dgvPlayerDamageLog, e);
-        _grpPlayerDamageLog.Controls.Add(_dgvPlayerDamageLog);
+
+        var playerDamageLayout = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            RowCount = 2
+        };
+        playerDamageLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        playerDamageLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+        playerDamageLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        playerDamageLayout.Controls.Add(playerDamageFilterPanel, 0, 0);
+        playerDamageLayout.Controls.Add(_dgvPlayerDamageLog, 0, 1);
+        _grpPlayerDamageLog.Controls.Add(playerDamageLayout);
 
         playerContentLayout.SetColumnSpan(grpPlayerVictims, 1);
         playerContentLayout.Controls.Add(_grpPlayerDamageLog, 1, 1);
@@ -226,6 +251,58 @@ public partial class FortniteReplayAnalyzer : Form
         splitMain.Panel2.Controls.Add(_openedReplayTabs);
         splitMain.SplitterDistance = ExpandedReplayPaneWidth;
         UpdateReplayBrowserHeaderChrome();
+    }
+
+    private void InitializeMenuStrip()
+    {
+        _menuStrip = new MenuStrip
+        {
+            Dock = DockStyle.Top,
+            GripStyle = ToolStripGripStyle.Visible,
+            BackColor = Color.FromArgb(244, 247, 252)
+        };
+
+        var fileMenu = new ToolStripMenuItem("File");
+        fileMenu.DropDownItems.Add("Open File", null, async (_, _) => await OpenReplayFilesAsync());
+        fileMenu.DropDownItems.Add("Close File", null, (_, _) => CloseCurrentReplayFile());
+        fileMenu.DropDownItems.Add("Close All Files", null, (_, _) => CloseAllReplayFiles());
+        fileMenu.DropDownItems.Add(new ToolStripSeparator());
+        fileMenu.DropDownItems.Add("Exit", null, (_, _) => Close());
+
+        var preferencesMenu = new ToolStripMenuItem("Preferences");
+        preferencesMenu.DropDownItems.Add("Settings", null, async (_, _) => await OpenSettingsAsync());
+
+        _menuStrip.Items.Add(fileMenu);
+        _menuStrip.Items.Add(preferencesMenu);
+        Controls.Add(_menuStrip);
+        MainMenuStrip = _menuStrip;
+        Controls.SetChildIndex(_menuStrip, 0);
+    }
+
+    private static FlowLayoutPanel CreateFilterFlowPanel()
+    {
+        return new FlowLayoutPanel
+        {
+            AutoScroll = true,
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            Padding = new Padding(4, 2, 4, 0),
+            WrapContents = false
+        };
+    }
+
+    private static CheckBox CreateFilterCheckBox(string text, EventHandler onChanged, bool isChecked = false)
+    {
+        var checkBox = new CheckBox
+        {
+            AutoSize = true,
+            Checked = isChecked,
+            Margin = new Padding(0, 2, 14, 0),
+            Text = text
+        };
+        checkBox.CheckedChanged += onChanged;
+        return checkBox;
     }
     private void WireEvents()
     {
@@ -370,34 +447,31 @@ public partial class FortniteReplayAnalyzer : Form
     private async Task RefreshReplayBrowserAsync()
     {
         btnRefreshReplays.Enabled = false;
-        lblReplayStatus.Text = Directory.Exists(_replayFolder)
-            ? $"Scanning {_replayFolder}"
-            : $"Replay folder not found: {_replayFolder}";
+        lblReplayStatus.Text = Directory.Exists(ReplayFolder)
+            ? $"Scanning {ReplayFolder}"
+            : $"Replay folder not found: {ReplayFolder}";
 
         ClearReplayDetails();
         _replayRows.Clear();
         BindReplayRows();
 
-        if (!Directory.Exists(_replayFolder))
+        var replayFiles = GetReplayFilePaths().ToArray();
+        _replayRows.AddRange(replayFiles.Select(ReplayBrowserRow.CreateFromFile));
+        BindReplayRows();
+
+        if (_replayRows.Count == 0)
         {
+            lblReplayStatus.Text = Directory.Exists(ReplayFolder)
+                ? "No replay files found."
+                : $"Replay folder not found: {ReplayFolder}";
             btnRefreshReplays.Enabled = true;
             return;
         }
 
-        var replayFiles = Directory.EnumerateFiles(_replayFolder, "*.replay", SearchOption.TopDirectoryOnly)
-            .OrderByDescending(File.GetLastWriteTimeUtc)
-            .ToArray();
-
-        _replayRows.AddRange(replayFiles.Select(ReplayBrowserRow.CreateFromFile));
-        BindReplayRows();
-
-        lblReplayStatus.Text = _replayRows.Count == 0
-            ? "No replay files found."
-            : $"Found {_replayRows.Count} replay file(s). Loading selected replay...";
-
+        lblReplayStatus.Text = $"Found {_replayRows.Count} replay file(s). Loading selected replay...";
         btnRefreshReplays.Enabled = true;
 
-        if (_replayRows.Count > 0 && dgvReplayBrowser.Rows.Count > 0)
+        if (dgvReplayBrowser.Rows.Count > 0)
         {
             _suppressReplaySelectionChanged = true;
             dgvReplayBrowser.ClearSelection();
@@ -428,7 +502,7 @@ public partial class FortniteReplayAnalyzer : Form
 
             lblReplayStatus.Text = _replayRows.Count == 0
                 ? "No replay files found."
-                : $"Loaded {_replayRows.Count} replay file(s) from {_replayFolder}";
+                : $"Loaded {_replayRows.Count} replay file(s) from {ReplayFolder}";
         }
         catch (Exception ex)
         {
@@ -670,7 +744,7 @@ public partial class FortniteReplayAnalyzer : Form
     private void BuildCombatEvents(FortniteReplay replay)
     {
         var rows = replay.DamageEvents
-            .Where(evt => !(_chkTeamDamageOnly?.Checked ?? false) || InvolvesReplayOwnerTeam(replay, evt))
+            .Where(evt => ShouldIncludeReplayDamageEvent(replay, evt))
             .Select(evt => CreateCombatEventRow(replay, evt))
             .OrderBy(row => row.TimeValue)
             .ToList();
@@ -900,6 +974,7 @@ public partial class FortniteReplayAnalyzer : Form
     {
         return replay.DamageEvents
             .Where(evt => MatchesPlayer(player, evt.InstigatorId, evt.InstigatorName) || MatchesPlayer(player, evt.TargetId, evt.TargetName))
+            .Where(evt => ShouldIncludePlayerDamageEvent(replay, player, evt))
             .Select(evt => CreateCombatEventRow(replay, evt))
             .OrderBy(row => row.TimeValue);
     }
@@ -1247,6 +1322,274 @@ public partial class FortniteReplayAnalyzer : Form
             }
         }
         _suppressReplaySelectionChanged = false;
+    }
+
+    private IEnumerable<string> GetReplayFilePaths()
+    {
+        var replayFiles = Enumerable.Empty<string>();
+        if (Directory.Exists(ReplayFolder))
+        {
+            replayFiles = Directory.EnumerateFiles(ReplayFolder, "*.replay", SearchOption.TopDirectoryOnly);
+        }
+
+        return replayFiles
+            .Concat(_manuallyAddedReplayPaths.Where(File.Exists))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(File.GetLastWriteTimeUtc);
+    }
+
+    private async Task OpenReplayFilesAsync()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            CheckFileExists = true,
+            Filter = "Fortnite Replay Files (*.replay)|*.replay|All Files (*.*)|*.*",
+            Multiselect = true,
+            Title = "Open Replay File"
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        await AddReplayFilesAsync(dialog.FileNames);
+    }
+
+    private async Task AddReplayFilesAsync(IEnumerable<string> filePaths)
+    {
+        ReplayBrowserRow? rowToSelect = null;
+
+        foreach (var filePath in filePaths.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var existingRow = _replayRows.FirstOrDefault(row => string.Equals(row.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+            if (existingRow is not null)
+            {
+                rowToSelect = existingRow;
+                continue;
+            }
+
+            _manuallyAddedReplayPaths.Add(filePath);
+            var newRow = ReplayBrowserRow.CreateFromFile(filePath);
+            _replayRows.Add(newRow);
+            rowToSelect = newRow;
+        }
+
+        if (rowToSelect is null)
+        {
+            return;
+        }
+
+        BindReplayRows();
+        SelectReplayBrowserRow(rowToSelect);
+        _selectedReplayRow = rowToSelect;
+        lblReplayStatus.Text = $"Added {rowToSelect.FileName}";
+        await EnsureReplayLoadedAsync(rowToSelect, ParseMode.Full, updateSelectionView: true);
+    }
+
+    private void CloseCurrentReplayFile()
+    {
+        if (_selectedReplayRow is null)
+        {
+            return;
+        }
+
+        RemoveReplayRow(_selectedReplayRow);
+    }
+
+    private void CloseAllReplayFiles()
+    {
+        if (ReferenceEquals(splitContent.Parent, _openedReplayTabs?.SelectedTab))
+        {
+            _openedReplayTabs.SelectedTab.Controls.Remove(splitContent);
+        }
+
+        _openedReplayTabs?.TabPages.Clear();
+        _replayRows.Clear();
+        _manuallyAddedReplayPaths.Clear();
+        ClearReplayDetails();
+        BindReplayRows();
+        lblReplayStatus.Text = "No replay files loaded.";
+    }
+
+    private void RemoveReplayRow(ReplayBrowserRow row)
+    {
+        var orderedRows = OrderReplayRows().ToList();
+        var orderedIndex = orderedRows.FindIndex(candidate => string.Equals(candidate.FilePath, row.FilePath, StringComparison.OrdinalIgnoreCase));
+        CloseReplayTab(row);
+        _replayRows.RemoveAll(candidate => string.Equals(candidate.FilePath, row.FilePath, StringComparison.OrdinalIgnoreCase));
+        _manuallyAddedReplayPaths.Remove(row.FilePath);
+
+        if (_replayRows.Count == 0)
+        {
+            ClearReplayDetails();
+            BindReplayRows();
+            lblReplayStatus.Text = "No replay files loaded.";
+            return;
+        }
+
+        var nextOrderedRows = OrderReplayRows().ToList();
+        var nextIndex = orderedIndex < 0 ? 0 : Math.Min(orderedIndex, nextOrderedRows.Count - 1);
+        var nextRow = nextOrderedRows[nextIndex];
+        _selectedReplayRow = nextRow;
+        BindReplayRows();
+        SelectReplayBrowserRow(nextRow);
+
+        if (nextRow.Replay is not null)
+        {
+            DisplayReplay(nextRow);
+        }
+        else
+        {
+            _ = EnsureReplayLoadedAsync(nextRow, ParseMode.Full, updateSelectionView: true);
+        }
+    }
+
+    private void CloseReplayTab(ReplayBrowserRow row)
+    {
+        if (_openedReplayTabs is null)
+        {
+            return;
+        }
+
+        var tabPage = _openedReplayTabs.TabPages
+            .Cast<TabPage>()
+            .FirstOrDefault(page => string.Equals((page.Tag as ReplayBrowserRow)?.FilePath, row.FilePath, StringComparison.OrdinalIgnoreCase));
+
+        if (tabPage is null)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(splitContent.Parent, tabPage))
+        {
+            tabPage.Controls.Remove(splitContent);
+        }
+
+        _openedReplayTabs.TabPages.Remove(tabPage);
+        tabPage.Dispose();
+    }
+
+    private async Task OpenSettingsAsync()
+    {
+        using var settingsForm = new SettingsForm(_settings);
+        if (settingsForm.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var previousFolder = ReplayFolder;
+        _settings = settingsForm.Settings.Clone();
+        AnalyzerSettingsStore.Save(_settings);
+        DebugOutputWriter.SetEnabled(_settings.DebugOutputEnabled);
+        ApplySettingsToUi();
+        UpdateReplayBrowserHeaderChrome();
+
+        if (!string.Equals(previousFolder, ReplayFolder, StringComparison.OrdinalIgnoreCase))
+        {
+            await RefreshReplayBrowserAsync();
+        }
+    }
+
+    private void RefreshDamageEventViews()
+    {
+        if (_selectedReplayRow?.Replay is not null)
+        {
+            BuildCombatEvents(_selectedReplayRow.Replay);
+            if (_selectedPlayer is not null && _dgvPlayerDamageLog is not null)
+            {
+                _dgvPlayerDamageLog.DataSource = BuildPlayerDamageRows(_selectedReplayRow.Replay, _selectedPlayer).ToList();
+            }
+        }
+    }
+
+    private bool ShouldIncludeReplayDamageEvent(FortniteReplay replay, DamageEvent evt)
+    {
+        if ((_chkTeamDamageOnly?.Checked ?? false) && !InvolvesReplayOwnerTeam(replay, evt))
+        {
+            return false;
+        }
+
+        var category = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
+        return IsDamageCategoryEnabled(category, _chkDamagePlayers, _chkDamageStructures, _chkDamageNpcs);
+    }
+
+    private bool ShouldIncludePlayerDamageEvent(FortniteReplay replay, PlayerData player, DamageEvent evt)
+    {
+        var category = MatchesPlayer(player, evt.InstigatorId, evt.InstigatorName)
+            ? ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot)
+            : ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot);
+
+        return IsDamageCategoryEnabled(category, _chkPlayerDamagePlayers, _chkPlayerDamageStructures, _chkPlayerDamageNpcs);
+    }
+
+    private static bool IsDamageCategoryEnabled(DamageParticipantCategory category, CheckBox? players, CheckBox? structures, CheckBox? npcs)
+    {
+        return category switch
+        {
+            DamageParticipantCategory.Player => players?.Checked ?? true,
+            DamageParticipantCategory.Bot => players?.Checked ?? true,
+            DamageParticipantCategory.Npc => npcs?.Checked ?? true,
+            _ => structures?.Checked ?? true
+        };
+    }
+
+    private void ApplySettingsToUi()
+    {
+        var accentColor = _settings.GetAccentColor();
+        var surfaceColor = _settings.GetSurfaceColor();
+        var backgroundColor = _settings.GetBackgroundColor();
+        var headerColor = ControlPaint.Light(backgroundColor);
+        var alternateRowColor = ControlPaint.LightLight(surfaceColor);
+
+        BackColor = backgroundColor;
+        replayBrowserLayout.BackColor = backgroundColor;
+        replayBrowserHeader.BackColor = headerColor;
+        playerHeaderPanel.BackColor = headerColor;
+        splitMain.BackColor = ControlPaint.Light(accentColor);
+        splitContent.BackColor = ControlPaint.Light(accentColor);
+
+        if (_menuStrip is not null)
+        {
+            _menuStrip.BackColor = surfaceColor;
+            _menuStrip.ForeColor = Color.FromArgb(32, 37, 43);
+        }
+
+        foreach (var groupBox in new Control[] { grpGameStats, grpKillFeed, grpCombatEvents, grpPlayers, grpPlayerOverview, grpPlayerCombatLog, grpPlayerVictims })
+        {
+            groupBox.BackColor = backgroundColor;
+            groupBox.ForeColor = Color.FromArgb(32, 37, 43);
+        }
+
+        if (_grpPlayerDamageLog is not null)
+        {
+            _grpPlayerDamageLog.BackColor = backgroundColor;
+            _grpPlayerDamageLog.ForeColor = Color.FromArgb(32, 37, 43);
+        }
+
+        foreach (var grid in GetThemedGrids())
+        {
+            grid.BackgroundColor = surfaceColor;
+            grid.DefaultCellStyle.SelectionBackColor = accentColor;
+            grid.AlternatingRowsDefaultCellStyle.BackColor = alternateRowColor;
+            grid.ColumnHeadersDefaultCellStyle.BackColor = ControlPaint.Light(surfaceColor);
+        }
+    }
+
+    private IEnumerable<DataGridView> GetThemedGrids()
+    {
+        yield return dgvReplayBrowser;
+        yield return dgvGameStats;
+        yield return dgvKillFeed;
+        yield return dgvCombatEvents;
+        yield return dgvPlayers;
+        yield return dgvPlayerOverview;
+        yield return dgvPlayerCombatLog;
+        yield return dgvPlayerVictims;
+        if (_dgvPlayerDamageLog is not null)
+        {
+            yield return _dgvPlayerDamageLog;
+        }
     }
 
     private static string ShortenTabTitle(string fileName)

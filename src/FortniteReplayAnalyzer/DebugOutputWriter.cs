@@ -1,7 +1,6 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.Json.Serialization.Metadata;
 
 namespace FortniteReplayAnalyzer;
 
@@ -21,11 +20,18 @@ internal static class DebugOutputWriter
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
 
-    static DebugOutputWriter()
+    private static bool _enabled = true;
+
+    public static void SetEnabled(bool enabled)
     {
-        Directory.CreateDirectory(LogDirectory);
-        Directory.CreateDirectory(ReplayDirectory);
-        LogInfo("Debug output initialized.");
+        lock (Sync)
+        {
+            _enabled = enabled;
+            if (_enabled)
+            {
+                EnsureDirectories();
+            }
+        }
     }
 
     public static void LogInfo(string message) => WriteLog("INFO", message);
@@ -34,14 +40,18 @@ internal static class DebugOutputWriter
 
     public static void LogError(string message, Exception? exception = null)
     {
-        var fullMessage = exception is null
-            ? message
-            : $"{message}{Environment.NewLine}{exception}";
+        var fullMessage = exception is null ? message : $"{message}{Environment.NewLine}{exception}";
         WriteLog("ERROR", fullMessage);
     }
 
     public static void WriteReplaySnapshot(string replayPath, object payload)
     {
+        if (!_enabled)
+        {
+            return;
+        }
+
+        EnsureDirectories();
         var outputPath = Path.Combine(ReplayDirectory, GetReplayLogFileName(replayPath));
 
         try
@@ -73,11 +83,23 @@ internal static class DebugOutputWriter
 
     private static void WriteLog(string level, string message)
     {
+        if (!_enabled)
+        {
+            return;
+        }
+
+        EnsureDirectories();
         var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [{level}] {message}{Environment.NewLine}";
         lock (Sync)
         {
             File.AppendAllText(SessionLogPath, line);
         }
+    }
+
+    private static void EnsureDirectories()
+    {
+        Directory.CreateDirectory(LogDirectory);
+        Directory.CreateDirectory(ReplayDirectory);
     }
 
     private static string GetReplayLogFileName(string replayPath)
@@ -91,4 +113,3 @@ internal static class DebugOutputWriter
         return fileName + ".json";
     }
 }
-
