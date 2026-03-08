@@ -34,6 +34,38 @@ public class ReplayReader : Unreal.Core.ReplayReader<FortniteReplay>
         return ReadReplay(stream);
     }
 
+    public bool TryReadReplay(string fileName, out FortniteReplay replay, out Exception exception)
+    {
+        try
+        {
+            replay = ReadReplay(fileName);
+            exception = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            replay = null;
+            exception = ex;
+            return false;
+        }
+    }
+
+    public bool TryReadReplay(Stream stream, out FortniteReplay replay, out Exception exception)
+    {
+        try
+        {
+            replay = ReadReplay(stream);
+            exception = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            replay = null;
+            exception = ex;
+            return false;
+        }
+    }
+
     public FortniteReplay ReadReplay(Stream stream)
     {
         using var archive = new Unreal.Core.BinaryReader(stream);
@@ -385,6 +417,7 @@ public class ReplayReader : Unreal.Core.ReplayReader<FortniteReplay>
         };
     }
 }
+
 
 
 

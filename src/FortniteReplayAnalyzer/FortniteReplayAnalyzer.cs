@@ -293,7 +293,20 @@ public partial class FortniteReplayAnalyzer : Form
 
         try
         {
-            var replay = await Task.Run(() => new ReplayReader(parseMode: parseMode).ReadReplay(row.FilePath));
+            var loadResult = await Task.Run(() => ParseReplaySafely(row.FilePath, parseMode));
+            if (loadResult.Exception is InvalidReplayException invalidReplayException)
+            {
+                ApplyReplayFailure(row, "Skipped", invalidReplayException, parseMode, updateSelectionView);
+                return;
+            }
+
+            if (loadResult.Exception is Exception ex)
+            {
+                ApplyReplayFailure(row, "Error", ex, parseMode, updateSelectionView);
+                return;
+            }
+
+            var replay = loadResult.Replay!;
             ApplyReplaySummary(row, replay);
             row.Replay = replay;
             row.Status = parseMode == ParseMode.Full ? $"Ready ({replay.DamageEvents.Count} hits)" : "Ready";
@@ -311,14 +324,6 @@ public partial class FortniteReplayAnalyzer : Form
                 Replay = replay
             });
         }
-        catch (InvalidReplayException ex)
-        {
-            ApplyReplayFailure(row, "Skipped", ex, parseMode, updateSelectionView);
-        }
-        catch (Exception ex)
-        {
-            ApplyReplayFailure(row, "Error", ex, parseMode, updateSelectionView);
-        }
         finally
         {
             row.IsLoading = false;
@@ -331,6 +336,13 @@ public partial class FortniteReplayAnalyzer : Form
         }
     }
 
+    private static ReplayLoadResult ParseReplaySafely(string filePath, ParseMode parseMode)
+    {
+        var reader = new ReplayReader(parseMode: parseMode);
+        return reader.TryReadReplay(filePath, out var replay, out var exception)
+            ? new ReplayLoadResult(replay, null)
+            : new ReplayLoadResult(null, exception);
+    }
     private void ApplyReplayFailure(ReplayBrowserRow row, string status, Exception ex, ParseMode parseMode, bool updateSelectionView)
     {
         row.Replay = null;
@@ -950,10 +962,8 @@ public partial class FortniteReplayAnalyzer : Form
 
         return vector.ToString() ?? "-";
     }
+
+    private sealed record ReplayLoadResult(FortniteReplay? Replay, Exception? Exception);
 }
-
-
-
-
 
 
