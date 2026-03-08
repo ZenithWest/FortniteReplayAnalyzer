@@ -4,22 +4,24 @@ namespace FortniteReplayAnalyzer;
 
 internal sealed class ReplayBrowserRow
 {
-    public required string FilePath { get; init; }
-    public required string FileName { get; init; }
-    public required DateTime RecordedAt { get; init; }
-    public required string RecordedAtText { get; init; }
-    public required TimeSpan Duration { get; init; }
-    public required string DurationText { get; init; }
-    public int? Placement { get; init; }
-    public required string PlacementText { get; init; }
-    public uint? Kills { get; init; }
-    public required string KillsText { get; init; }
-    public int PlayerCount { get; init; }
-    public required string PlayerCountText { get; init; }
-    public FortniteReplay? Replay { get; init; }
-    public required string Status { get; init; }
+    public string FilePath { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public DateTime RecordedAt { get; set; }
+    public string RecordedAtText { get; set; } = "-";
+    public TimeSpan Duration { get; set; }
+    public string DurationText { get; set; } = "-";
+    public int? Placement { get; set; }
+    public string PlacementText { get; set; } = "-";
+    public uint? Kills { get; set; }
+    public string KillsText { get; set; } = "-";
+    public int PlayerCount { get; set; }
+    public string PlayerCountText { get; set; } = "-";
+    public FortniteReplay? Replay { get; set; }
+    public string Status { get; set; } = "Queued";
+    public bool IsLoading { get; set; }
+    public bool SummaryLoaded { get; set; }
 
-    public static ReplayBrowserRow CreateError(string filePath, string message)
+    public static ReplayBrowserRow CreateFromFile(string filePath)
     {
         var recordedAt = File.GetLastWriteTime(filePath);
 
@@ -29,13 +31,7 @@ internal sealed class ReplayBrowserRow
             FileName = Path.GetFileName(filePath),
             RecordedAt = recordedAt,
             RecordedAtText = recordedAt.ToString("g"),
-            Duration = TimeSpan.Zero,
-            DurationText = "-",
-            PlacementText = "-",
-            KillsText = "-",
-            PlayerCountText = "-",
-            Status = "Error: " + message,
-            PlayerCount = 0
+            Status = "Queued"
         };
     }
 }

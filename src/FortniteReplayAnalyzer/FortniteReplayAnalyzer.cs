@@ -41,7 +41,7 @@ public partial class FortniteReplayAnalyzer : Form
         btnRefreshReplays.Click += async (_, _) => await RefreshReplayBrowserAsync();
         btnToggleReplayPane.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
 
-        dgvReplayBrowser.SelectionChanged += (_, _) => HandleReplaySelectionChanged();
+        dgvReplayBrowser.SelectionChanged += async (_, _) => await HandleReplaySelectionChangedAsync();
         dgvReplayBrowser.ColumnHeaderMouseClick += (_, e) => SortReplayRows(dgvReplayBrowser.Columns[e.ColumnIndex].Name);
         dgvReplayBrowser.CellDoubleClick += (_, e) =>
         {
@@ -106,56 +106,13 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void BuildReplayBrowserColumns()
     {
-        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(ReplayBrowserRow.FileName),
-            HeaderText = "Replay",
-            DataPropertyName = nameof(ReplayBrowserRow.FileName),
-            FillWeight = 180
-        });
-        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(ReplayBrowserRow.RecordedAtText),
-            HeaderText = "Played",
-            DataPropertyName = nameof(ReplayBrowserRow.RecordedAtText),
-            FillWeight = 110
-        });
-        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(ReplayBrowserRow.DurationText),
-            HeaderText = "Length",
-            DataPropertyName = nameof(ReplayBrowserRow.DurationText),
-            FillWeight = 70
-        });
-        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(ReplayBrowserRow.PlacementText),
-            HeaderText = "Place",
-            DataPropertyName = nameof(ReplayBrowserRow.PlacementText),
-            FillWeight = 55
-        });
-        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(ReplayBrowserRow.KillsText),
-            HeaderText = "Kills",
-            DataPropertyName = nameof(ReplayBrowserRow.KillsText),
-            FillWeight = 55
-        });
-        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(ReplayBrowserRow.PlayerCountText),
-            HeaderText = "Players",
-            DataPropertyName = nameof(ReplayBrowserRow.PlayerCountText),
-            FillWeight = 65
-        });
-        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(ReplayBrowserRow.Status),
-            HeaderText = "Status",
-            DataPropertyName = nameof(ReplayBrowserRow.Status),
-            FillWeight = 90
-        });
-
+        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(ReplayBrowserRow.FileName), HeaderText = "Replay", DataPropertyName = nameof(ReplayBrowserRow.FileName), FillWeight = 180 });
+        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(ReplayBrowserRow.RecordedAtText), HeaderText = "Played", DataPropertyName = nameof(ReplayBrowserRow.RecordedAtText), FillWeight = 110 });
+        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(ReplayBrowserRow.DurationText), HeaderText = "Length", DataPropertyName = nameof(ReplayBrowserRow.DurationText), FillWeight = 70 });
+        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(ReplayBrowserRow.PlacementText), HeaderText = "Place", DataPropertyName = nameof(ReplayBrowserRow.PlacementText), FillWeight = 55 });
+        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(ReplayBrowserRow.KillsText), HeaderText = "Kills", DataPropertyName = nameof(ReplayBrowserRow.KillsText), FillWeight = 55 });
+        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(ReplayBrowserRow.PlayerCountText), HeaderText = "Players", DataPropertyName = nameof(ReplayBrowserRow.PlayerCountText), FillWeight = 65 });
+        dgvReplayBrowser.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(ReplayBrowserRow.Status), HeaderText = "Status", DataPropertyName = nameof(ReplayBrowserRow.Status), FillWeight = 90 });
         dgvReplayBrowser.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
     }
 
@@ -163,144 +120,38 @@ public partial class FortniteReplayAnalyzer : Form
 
     private static void BuildGameStatsColumns(DataGridView grid)
     {
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(DetailRow.Label),
-            DataPropertyName = nameof(DetailRow.Label),
-            FillWeight = 40
-        });
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(DetailRow.Value),
-            DataPropertyName = nameof(DetailRow.Value),
-            FillWeight = 60
-        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(DetailRow.Label), DataPropertyName = nameof(DetailRow.Label), FillWeight = 40 });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(DetailRow.Value), DataPropertyName = nameof(DetailRow.Value), FillWeight = 60 });
         grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
     }
 
     private static void BuildKillFeedColumns(DataGridView grid)
     {
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(KillFeedRow.TimeText),
-            HeaderText = "Time",
-            DataPropertyName = nameof(KillFeedRow.TimeText),
-            FillWeight = 65
-        });
-        grid.Columns.Add(new DataGridViewLinkColumn
-        {
-            Name = nameof(KillFeedRow.ActorName),
-            HeaderText = "Actor",
-            DataPropertyName = nameof(KillFeedRow.ActorName),
-            FillWeight = 130,
-            TrackVisitedState = false,
-            UseColumnTextForLinkValue = false
-        });
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(KillFeedRow.EventText),
-            HeaderText = "Event",
-            DataPropertyName = nameof(KillFeedRow.EventText),
-            FillWeight = 85
-        });
-        grid.Columns.Add(new DataGridViewLinkColumn
-        {
-            Name = nameof(KillFeedRow.TargetName),
-            HeaderText = "Target",
-            DataPropertyName = nameof(KillFeedRow.TargetName),
-            FillWeight = 130,
-            TrackVisitedState = false,
-            UseColumnTextForLinkValue = false
-        });
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(KillFeedRow.DistanceText),
-            HeaderText = "Distance",
-            DataPropertyName = nameof(KillFeedRow.DistanceText),
-            FillWeight = 70
-        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(KillFeedRow.TimeText), HeaderText = "Time", DataPropertyName = nameof(KillFeedRow.TimeText), FillWeight = 65 });
+        grid.Columns.Add(new DataGridViewLinkColumn { Name = nameof(KillFeedRow.ActorName), HeaderText = "Actor", DataPropertyName = nameof(KillFeedRow.ActorName), FillWeight = 130, TrackVisitedState = false, UseColumnTextForLinkValue = false });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(KillFeedRow.EventText), HeaderText = "Event", DataPropertyName = nameof(KillFeedRow.EventText), FillWeight = 85 });
+        grid.Columns.Add(new DataGridViewLinkColumn { Name = nameof(KillFeedRow.TargetName), HeaderText = "Target", DataPropertyName = nameof(KillFeedRow.TargetName), FillWeight = 130, TrackVisitedState = false, UseColumnTextForLinkValue = false });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(KillFeedRow.DistanceText), HeaderText = "Distance", DataPropertyName = nameof(KillFeedRow.DistanceText), FillWeight = 70 });
         grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
     }
 
     private void BuildPlayerColumns()
     {
-        dgvPlayers.Columns.Add(new DataGridViewLinkColumn
-        {
-            Name = nameof(PlayerSummaryRow.DisplayName),
-            HeaderText = "Player",
-            DataPropertyName = nameof(PlayerSummaryRow.DisplayName),
-            FillWeight = 170,
-            TrackVisitedState = false,
-            UseColumnTextForLinkValue = false
-        });
-        dgvPlayers.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(PlayerSummaryRow.TeamText),
-            HeaderText = "Team",
-            DataPropertyName = nameof(PlayerSummaryRow.TeamText),
-            FillWeight = 55
-        });
-        dgvPlayers.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(PlayerSummaryRow.PlacementText),
-            HeaderText = "Place",
-            DataPropertyName = nameof(PlayerSummaryRow.PlacementText),
-            FillWeight = 55
-        });
-        dgvPlayers.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(PlayerSummaryRow.KillsText),
-            HeaderText = "Kills",
-            DataPropertyName = nameof(PlayerSummaryRow.KillsText),
-            FillWeight = 55
-        });
-        dgvPlayers.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(PlayerSummaryRow.Platform),
-            HeaderText = "Platform",
-            DataPropertyName = nameof(PlayerSummaryRow.Platform),
-            FillWeight = 75
-        });
-        dgvPlayers.Columns.Add(new DataGridViewCheckBoxColumn
-        {
-            Name = nameof(PlayerSummaryRow.IsBot),
-            HeaderText = "Bot",
-            DataPropertyName = nameof(PlayerSummaryRow.IsBot),
-            FillWeight = 45
-        });
+        dgvPlayers.Columns.Add(new DataGridViewLinkColumn { Name = nameof(PlayerSummaryRow.DisplayName), HeaderText = "Player", DataPropertyName = nameof(PlayerSummaryRow.DisplayName), FillWeight = 170, TrackVisitedState = false, UseColumnTextForLinkValue = false });
+        dgvPlayers.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerSummaryRow.TeamText), HeaderText = "Team", DataPropertyName = nameof(PlayerSummaryRow.TeamText), FillWeight = 55 });
+        dgvPlayers.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerSummaryRow.PlacementText), HeaderText = "Place", DataPropertyName = nameof(PlayerSummaryRow.PlacementText), FillWeight = 55 });
+        dgvPlayers.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerSummaryRow.KillsText), HeaderText = "Kills", DataPropertyName = nameof(PlayerSummaryRow.KillsText), FillWeight = 55 });
+        dgvPlayers.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerSummaryRow.Platform), HeaderText = "Platform", DataPropertyName = nameof(PlayerSummaryRow.Platform), FillWeight = 75 });
+        dgvPlayers.Columns.Add(new DataGridViewCheckBoxColumn { Name = nameof(PlayerSummaryRow.IsBot), HeaderText = "Bot", DataPropertyName = nameof(PlayerSummaryRow.IsBot), FillWeight = 45 });
         dgvPlayers.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
     }
 
     private void BuildPlayerVictimColumns()
     {
-        dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(PlayerVictimRow.PlayerName),
-            HeaderText = "Player",
-            DataPropertyName = nameof(PlayerVictimRow.PlayerName),
-            FillWeight = 170
-        });
-        dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(PlayerVictimRow.EventText),
-            HeaderText = "Event",
-            DataPropertyName = nameof(PlayerVictimRow.EventText),
-            FillWeight = 80
-        });
-        dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(PlayerVictimRow.TimeText),
-            HeaderText = "Time",
-            DataPropertyName = nameof(PlayerVictimRow.TimeText),
-            FillWeight = 70
-        });
-        dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = nameof(PlayerVictimRow.DistanceText),
-            HeaderText = "Distance",
-            DataPropertyName = nameof(PlayerVictimRow.DistanceText),
-            FillWeight = 80
-        });
+        dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.PlayerName), HeaderText = "Player", DataPropertyName = nameof(PlayerVictimRow.PlayerName), FillWeight = 170 });
+        dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.EventText), HeaderText = "Event", DataPropertyName = nameof(PlayerVictimRow.EventText), FillWeight = 80 });
+        dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.TimeText), HeaderText = "Time", DataPropertyName = nameof(PlayerVictimRow.TimeText), FillWeight = 70 });
+        dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.DistanceText), HeaderText = "Distance", DataPropertyName = nameof(PlayerVictimRow.DistanceText), FillWeight = 80 });
         dgvPlayerVictims.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
     }
 
@@ -308,7 +159,7 @@ public partial class FortniteReplayAnalyzer : Form
     {
         btnRefreshReplays.Enabled = false;
         lblReplayStatus.Text = Directory.Exists(_replayFolder)
-            ? $"Loading replays from {_replayFolder}"
+            ? $"Scanning {_replayFolder}"
             : $"Replay folder not found: {_replayFolder}";
 
         ClearReplayDetails();
@@ -325,65 +176,38 @@ public partial class FortniteReplayAnalyzer : Form
             .OrderByDescending(File.GetLastWriteTimeUtc)
             .ToArray();
 
-        var rows = await Task.Run(() =>
-        {
-            var list = new List<ReplayBrowserRow>();
-
-            foreach (var replayFile in replayFiles)
-            {
-                try
-                {
-                    var replay = new ReplayReader(parseMode: ParseMode.Normal).ReadReplay(replayFile);
-                    list.Add(CreateReplayBrowserRow(replayFile, replay));
-                }
-                catch (Exception ex)
-                {
-                    list.Add(ReplayBrowserRow.CreateError(replayFile, ex.Message));
-                }
-            }
-
-            return list;
-        });
-
-        _replayRows.AddRange(rows);
+        _replayRows.AddRange(replayFiles.Select(ReplayBrowserRow.CreateFromFile));
         BindReplayRows();
+
+        lblReplayStatus.Text = _replayRows.Count == 0
+            ? "No replay files found."
+            : $"Found {_replayRows.Count} replay file(s). Loading summaries...";
+
+        btnRefreshReplays.Enabled = true;
+
+        if (_replayRows.Count > 0 && dgvReplayBrowser.Rows.Count > 0)
+        {
+            dgvReplayBrowser.ClearSelection();
+            dgvReplayBrowser.Rows[0].Selected = true;
+            dgvReplayBrowser.CurrentCell = dgvReplayBrowser.Rows[0].Cells[0];
+        }
+
+        await LoadReplaySummariesAsync();
+    }
+
+    private async Task LoadReplaySummariesAsync()
+    {
+        foreach (var row in _replayRows.Where(r => !r.SummaryLoaded && !r.IsLoading).ToList())
+        {
+            await LoadReplayRowAsync(row, updateSelectionView: row == _selectedReplayRow);
+        }
+
         lblReplayStatus.Text = _replayRows.Count == 0
             ? "No replay files found."
             : $"Loaded {_replayRows.Count} replay file(s) from {_replayFolder}";
-        btnRefreshReplays.Enabled = true;
     }
 
-    private ReplayBrowserRow CreateReplayBrowserRow(string filePath, FortniteReplay replay)
-    {
-        var replayOwner = GetReplayOwner(replay);
-        var timestamp = replay.Info.Timestamp != default
-            ? replay.Info.Timestamp.ToLocalTime()
-            : File.GetLastWriteTime(filePath);
-
-        var placement = replayOwner?.Placement ?? (int?)replay.TeamStats?.Position;
-        var kills = replayOwner?.Kills ?? replay.Stats?.Eliminations;
-        var players = replay.PlayerData?.Count() ?? 0;
-
-        return new ReplayBrowserRow
-        {
-            FilePath = filePath,
-            FileName = Path.GetFileName(filePath),
-            RecordedAt = timestamp,
-            RecordedAtText = timestamp.ToString("g", CultureInfo.CurrentCulture),
-            Duration = TimeSpan.FromMilliseconds(replay.Info.LengthInMs),
-            DurationText = FormatDuration(TimeSpan.FromMilliseconds(replay.Info.LengthInMs)),
-            Placement = placement,
-            PlacementText = FormatNullable(placement),
-            Kills = kills,
-            KillsText = FormatNullable(kills),
-            PlayerCount = players,
-            PlayerCountText = players.ToString(CultureInfo.CurrentCulture),
-            Replay = replay,
-            Status = "Ready"
-        };
-    }
-
-    private void HandleReplaySelectionChanged()
+    private async Task HandleReplaySelectionChangedAsync()
     {
         if (dgvReplayBrowser.CurrentRow?.DataBoundItem is not ReplayBrowserRow row)
         {
@@ -391,20 +215,99 @@ public partial class FortniteReplayAnalyzer : Form
         }
 
         _selectedReplayRow = row;
-        DisplayReplay(row);
 
-        if (!_isReplayPaneCollapsed && row.Replay is not null)
+        if (!_isReplayPaneCollapsed)
         {
             SetReplayPaneCollapsed(true);
         }
+
+        if (row.Replay is null && !row.IsLoading)
+        {
+            await LoadReplayRowAsync(row, updateSelectionView: true);
+            return;
+        }
+
+        DisplayReplay(row);
+    }
+
+    private async Task LoadReplayRowAsync(ReplayBrowserRow row, bool updateSelectionView)
+    {
+        if (row.IsLoading)
+        {
+            return;
+        }
+
+        row.IsLoading = true;
+        row.Status = "Loading...";
+        BindReplayRows();
+
+        try
+        {
+            var replay = await Task.Run(() => new ReplayReader(parseMode: ParseMode.Normal).ReadReplay(row.FilePath));
+            ApplyReplaySummary(row, replay);
+            row.Replay = replay;
+            row.Status = "Ready";
+            row.SummaryLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            row.Replay = null;
+            row.Status = "Error";
+            row.SummaryLoaded = true;
+            row.Duration = TimeSpan.Zero;
+            row.DurationText = "-";
+            row.Placement = null;
+            row.PlacementText = "-";
+            row.Kills = null;
+            row.KillsText = "-";
+            row.PlayerCount = 0;
+            row.PlayerCountText = "-";
+
+            if (updateSelectionView)
+            {
+                lblReplayStatus.Text = $"Unable to parse {row.FileName}: {ex.Message}";
+                ClearReplayDetails(keepReplaySelection: true);
+            }
+        }
+        finally
+        {
+            row.IsLoading = false;
+            BindReplayRows();
+
+            if (updateSelectionView && row.Replay is not null && row == _selectedReplayRow)
+            {
+                DisplayReplay(row);
+            }
+        }
+    }
+
+    private static void ApplyReplaySummary(ReplayBrowserRow row, FortniteReplay replay)
+    {
+        var replayOwner = GetReplayOwner(replay);
+        var timestamp = replay.Info.Timestamp != default
+            ? replay.Info.Timestamp.ToLocalTime()
+            : File.GetLastWriteTime(row.FilePath);
+
+        row.RecordedAt = timestamp;
+        row.RecordedAtText = timestamp.ToString("g", CultureInfo.CurrentCulture);
+        row.Duration = TimeSpan.FromMilliseconds(replay.Info.LengthInMs);
+        row.DurationText = FormatDuration(row.Duration);
+        row.Placement = replayOwner?.Placement ?? (int?)replay.TeamStats?.Position;
+        row.PlacementText = FormatNullable(row.Placement);
+        row.Kills = replayOwner?.Kills ?? replay.Stats?.Eliminations;
+        row.KillsText = FormatNullable(row.Kills);
+        row.PlayerCount = replay.PlayerData?.Count() ?? 0;
+        row.PlayerCountText = row.PlayerCount.ToString(CultureInfo.CurrentCulture);
     }
 
     private void DisplayReplay(ReplayBrowserRow row)
     {
         if (row.Replay is null)
         {
-            lblReplayStatus.Text = $"Unable to parse {row.FileName}: {row.Status}";
-            ClearReplayDetails();
+            lblReplayStatus.Text = row.Status == "Error"
+                ? $"Unable to parse {row.FileName}."
+                : $"Loading {row.FileName}...";
+            ClearReplayDetails(keepReplaySelection: true);
             return;
         }
 
@@ -444,12 +347,10 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void BuildKillFeed(FortniteReplay replay)
     {
-        var rows = replay.KillFeed
+        dgvKillFeed.DataSource = replay.KillFeed
             .Select(entry => CreateKillFeedRow(replay, entry))
             .OrderBy(entry => entry.TimeValue)
             .ToList();
-
-        dgvKillFeed.DataSource = rows;
     }
 
     private KillFeedRow CreateKillFeedRow(FortniteReplay replay, KillFeedEntry entry)
@@ -477,20 +378,19 @@ public partial class FortniteReplayAnalyzer : Form
     private void BuildPlayerList(FortniteReplay replay)
     {
         _playerRows.Clear();
-        _playerRows.AddRange(replay.PlayerData
-            .Select(player => new PlayerSummaryRow
-            {
-                Player = player,
-                DisplayName = ResolvePlayerName(player),
-                Team = player.TeamIndex,
-                TeamText = FormatNullable(player.TeamIndex),
-                Placement = player.Placement,
-                PlacementText = FormatNullable(player.Placement),
-                Kills = player.Kills,
-                KillsText = FormatNullable(player.Kills),
-                Platform = string.IsNullOrWhiteSpace(player.Platform) ? "-" : player.Platform,
-                IsBot = player.IsBot
-            }));
+        _playerRows.AddRange(replay.PlayerData.Select(player => new PlayerSummaryRow
+        {
+            Player = player,
+            DisplayName = ResolvePlayerName(player),
+            Team = player.TeamIndex,
+            TeamText = FormatNullable(player.TeamIndex),
+            Placement = player.Placement,
+            PlacementText = FormatNullable(player.Placement),
+            Kills = player.Kills,
+            KillsText = FormatNullable(player.Kills),
+            Platform = string.IsNullOrWhiteSpace(player.Platform) ? "-" : player.Platform,
+            IsBot = player.IsBot
+        }));
 
         SortPlayerRows(_playerSortColumn, toggle: false);
     }
@@ -606,9 +506,13 @@ public partial class FortniteReplayAnalyzer : Form
             });
     }
 
-    private void ClearReplayDetails()
+    private void ClearReplayDetails(bool keepReplaySelection = false)
     {
-        _selectedReplayRow = null;
+        if (!keepReplaySelection)
+        {
+            _selectedReplayRow = null;
+        }
+
         _selectedPlayer = null;
         dgvGameStats.DataSource = new List<DetailRow>();
         dgvKillFeed.DataSource = new List<KillFeedRow>();
@@ -700,11 +604,7 @@ public partial class FortniteReplayAnalyzer : Form
             _ => row => row.Kills ?? uint.MinValue
         };
 
-        var ordered = (_playerSortAscending
-            ? _playerRows.OrderBy(selector).ThenBy(row => row.DisplayName)
-            : _playerRows.OrderByDescending(selector).ThenBy(row => row.DisplayName))
-            .ToList();
-
+        var ordered = (_playerSortAscending ? _playerRows.OrderBy(selector).ThenBy(row => row.DisplayName) : _playerRows.OrderByDescending(selector).ThenBy(row => row.DisplayName)).ToList();
         dgvPlayers.DataSource = ordered;
 
         if (selectedKey is null)
@@ -730,8 +630,7 @@ public partial class FortniteReplayAnalyzer : Form
         btnToggleReplayPane.Text = collapsed ? "Expand" : "Collapse";
     }
 
-    private static PlayerData? GetReplayOwner(FortniteReplay replay) =>
-        replay.PlayerData?.FirstOrDefault(player => player.IsReplayOwner);
+    private static PlayerData? GetReplayOwner(FortniteReplay replay) => replay.PlayerData?.FirstOrDefault(player => player.IsReplayOwner);
 
     private static PlayerData? FindPlayer(FortniteReplay replay, int? playerId, string? playerLookupKey)
     {
@@ -758,11 +657,7 @@ public partial class FortniteReplayAnalyzer : Form
             return ShortenIdentifier(fallback);
         }
 
-        var preferred = player.PlayerName
-            ?? player.PlayerNameCustomOverride
-            ?? player.StreamerModeName
-            ?? player.PlayerId;
-
+        var preferred = player.PlayerName ?? player.PlayerNameCustomOverride ?? player.StreamerModeName ?? player.PlayerId;
         return ShortenIdentifier(preferred);
     }
 
@@ -824,8 +719,6 @@ public partial class FortniteReplayAnalyzer : Form
             return "-";
         }
 
-        return duration.TotalHours >= 1
-            ? duration.ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture)
-            : duration.ToString(@"m\:ss", CultureInfo.InvariantCulture);
+        return duration.TotalHours >= 1 ? duration.ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture) : duration.ToString(@"m\:ss", CultureInfo.InvariantCulture);
     }
 }
