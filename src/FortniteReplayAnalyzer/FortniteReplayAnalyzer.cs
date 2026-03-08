@@ -279,6 +279,19 @@ public partial class FortniteReplayAnalyzer : Form
         MainMenuStrip = _menuStrip;
         Controls.SetChildIndex(_menuStrip, 0);
         _menuStrip.BringToFront();
+        splitMain.Dock = DockStyle.Fill;
+    }
+
+    private void LayoutContentBelowMenu()
+    {
+        if (_menuStrip is null)
+        {
+            return;
+        }
+
+        _menuStrip.Dock = DockStyle.Top;
+        splitMain.Dock = DockStyle.Fill;
+        _menuStrip.BringToFront();
     }
 
     private static FlowLayoutPanel CreateFilterFlowPanel()
@@ -1472,24 +1485,32 @@ public partial class FortniteReplayAnalyzer : Form
         tabPage.Dispose();
     }
 
-    private async Task OpenSettingsAsync()
+    private Task OpenSettingsAsync()
     {
         using var settingsForm = new SettingsForm(_settings);
+        settingsForm.ApplyRequested += (_, _) => ApplySettings(settingsForm.Settings);
         if (settingsForm.ShowDialog(this) != DialogResult.OK)
         {
-            return;
+            return Task.CompletedTask;
         }
 
+        ApplySettings(settingsForm.Settings);
+        return Task.CompletedTask;
+    }
+
+    private void ApplySettings(AnalyzerSettings settings)
+    {
         var previousFolder = ReplayFolder;
-        _settings = settingsForm.Settings.Clone();
+        _settings = settings.Clone();
         AnalyzerSettingsStore.Save(_settings);
         DebugOutputWriter.SetEnabled(_settings.DebugOutputEnabled);
         ApplySettingsToUi();
         UpdateReplayBrowserHeaderChrome();
+        LayoutContentBelowMenu();
 
         if (!string.Equals(previousFolder, ReplayFolder, StringComparison.OrdinalIgnoreCase))
         {
-            await RefreshReplayBrowserAsync();
+            _ = RefreshReplayBrowserAsync();
         }
     }
 

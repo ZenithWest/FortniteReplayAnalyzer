@@ -15,6 +15,8 @@ internal sealed class SettingsForm : Form
     private readonly Panel _surfacePreview;
     private readonly Panel _backgroundPreview;
 
+    public event EventHandler? ApplyRequested;
+
     public SettingsForm(AnalyzerSettings settings)
     {
         _workingCopy = settings.Clone();
@@ -59,9 +61,16 @@ internal sealed class SettingsForm : Form
         layout.Controls.Add(buttonPanel, 0, 1);
 
         var btnOk = new Button { Text = "OK", Width = 100, DialogResult = DialogResult.OK };
+        var btnApply = new Button { Text = "Apply", Width = 100 };
         var btnCancel = new Button { Text = "Cancel", Width = 100, DialogResult = DialogResult.Cancel };
         btnOk.Click += (_, _) => ApplyValues();
+        btnApply.Click += (_, _) =>
+        {
+            ApplyValues();
+            ApplyRequested?.Invoke(this, EventArgs.Empty);
+        };
         buttonPanel.Controls.Add(btnOk);
+        buttonPanel.Controls.Add(btnApply);
         buttonPanel.Controls.Add(btnCancel);
         AcceptButton = btnOk;
         CancelButton = btnCancel;
