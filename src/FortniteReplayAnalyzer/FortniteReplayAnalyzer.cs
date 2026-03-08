@@ -43,6 +43,8 @@ public partial class FortniteReplayAnalyzer : Form
     private CheckBox? _chkPlayerDamageBots;
     private CheckBox? _chkPlayerDamageStructures;
     private CheckBox? _chkPlayerDamageNpcs;
+    private CheckBox? _chkPlayerKillLogPlayers;
+    private CheckBox? _chkPlayerKillLogBots;
     private GroupBox? _grpPlayerDamageLog;
     private DataGridView? _dgvPlayerDamageLog;
     private TabControl? _openedReplayTabs;
@@ -162,6 +164,17 @@ public partial class FortniteReplayAnalyzer : Form
         dgvCombatEvents.Dock = DockStyle.Fill;
         grpCombatEvents.Controls.Add(dgvCombatEvents);
         grpCombatEvents.Controls.Add(damageFilterPanel);
+
+        var playerKillLogFilterPanel = CreateFilterFlowPanel();
+        _chkPlayerKillLogPlayers = CreateFilterCheckBox("Players", (_, _) => RefreshPlayerKillLog(), true);
+        _chkPlayerKillLogBots = CreateFilterCheckBox("Bots", (_, _) => RefreshPlayerKillLog(), true);
+        playerKillLogFilterPanel.Controls.Add(_chkPlayerKillLogPlayers);
+        playerKillLogFilterPanel.Controls.Add(_chkPlayerKillLogBots);
+
+        grpPlayerCombatLog.Controls.Clear();
+        dgvPlayerCombatLog.Dock = DockStyle.Fill;
+        grpPlayerCombatLog.Controls.Add(dgvPlayerCombatLog);
+        grpPlayerCombatLog.Controls.Add(playerKillLogFilterPanel);
 
         _grpPlayerDamageLog = new GroupBox
         {
@@ -913,7 +926,7 @@ public partial class FortniteReplayAnalyzer : Form
         lblSelectedPlayer.Text = ResolvePlayerName(player, player.Id, player.PlayerId);
         lblPlayerPanelTitle.Text = $"Player Stats - {ResolvePlayerName(player, player.Id, player.PlayerId)}";
         dgvPlayerOverview.DataSource = BuildPlayerOverview(_selectedReplayRow.Replay, player).ToList();
-        dgvPlayerCombatLog.DataSource = BuildPlayerCombatLog(_selectedReplayRow.Replay, player).ToList();
+        RefreshPlayerKillLog();
         dgvPlayerVictims.DataSource = BuildPlayerVictimRows(_selectedReplayRow.Replay, player).ToList();
         if (_dgvPlayerDamageLog is not null)
         {
@@ -969,8 +982,20 @@ public partial class FortniteReplayAnalyzer : Form
     {
         return replay.KillFeed
             .Where(entry => MatchesPlayer(player, entry.PlayerId, entry.PlayerName) || MatchesResolvedKillFeedActor(replay, player, entry))
+            .Where(entry => ShouldIncludePlayerKillLogEntry(replay, player, entry))
             .Select(entry => CreateKillFeedRow(replay, entry))
             .OrderBy(entry => entry.TimeValue);
+    }
+
+    private void RefreshPlayerKillLog()
+    {
+        if (_selectedReplayRow?.Replay is null || _selectedPlayer is null)
+        {
+            dgvPlayerCombatLog.DataSource = new List<KillFeedRow>();
+            return;
+        }
+
+        dgvPlayerCombatLog.DataSource = BuildPlayerCombatLog(_selectedReplayRow.Replay, _selectedPlayer).ToList();
     }
 
     private IEnumerable<PlayerVictimRow> BuildPlayerVictimRows(FortniteReplay replay, PlayerData player)
@@ -1550,6 +1575,17 @@ public partial class FortniteReplayAnalyzer : Form
             : ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot);
 
         return IsDamageCategoryEnabled(category, _chkPlayerDamagePlayers, _chkPlayerDamageBots, _chkPlayerDamageStructures, _chkPlayerDamageNpcs);
+    }
+
+    private bool ShouldIncludePlayerKillLogEntry(FortniteReplay replay, PlayerData player, KillFeedEntry entry)
+    {
+        var counterpart = MatchesPlayer(player, entry.PlayerId, entry.PlayerName)
+            ? ResolveKillFeedActorReference(replay, entry).Player
+            : FindPlayer(replay, entry.PlayerId, entry.PlayerName);
+
+        return counterpart?.IsBot == true
+            ? _chkPlayerKillLogBots?.Checked ?? true
+            : _chkPlayerKillLogPlayers?.Checked ?? true;
     }
 
     private static bool IsDamageCategoryEnabled(DamageParticipantCategory category, CheckBox? players, CheckBox? bots, CheckBox? structures, CheckBox? npcs)
