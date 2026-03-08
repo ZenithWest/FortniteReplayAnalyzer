@@ -1,6 +1,7 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace FortniteReplayAnalyzer;
 
@@ -16,7 +17,8 @@ internal static class DebugOutputWriter
         WriteIndented = true,
         ReferenceHandler = ReferenceHandler.IgnoreCycles,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
 
     static DebugOutputWriter()
@@ -41,11 +43,31 @@ internal static class DebugOutputWriter
     public static void WriteReplaySnapshot(string replayPath, object payload)
     {
         var outputPath = Path.Combine(ReplayDirectory, GetReplayLogFileName(replayPath));
-        var json = JsonSerializer.Serialize(payload, JsonOptions);
 
-        lock (Sync)
+        try
         {
-            File.WriteAllText(outputPath, json);
+            var json = JsonSerializer.Serialize(payload, JsonOptions);
+            lock (Sync)
+            {
+                File.WriteAllText(outputPath, json);
+            }
+        }
+        catch (Exception ex)
+        {
+            var fallback = JsonSerializer.Serialize(new
+            {
+                ReplayPath = replayPath,
+                FailedAt = DateTime.Now,
+                Error = ex.ToString(),
+                PayloadType = payload.GetType().FullName
+            }, JsonOptions);
+
+            lock (Sync)
+            {
+                File.WriteAllText(outputPath, fallback);
+            }
+
+            LogWarning($"Failed to serialize replay snapshot for '{Path.GetFileName(replayPath)}'. Wrote fallback snapshot instead. {ex.Message}");
         }
     }
 
@@ -69,3 +91,4 @@ internal static class DebugOutputWriter
         return fileName + ".json";
     }
 }
+
