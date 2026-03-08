@@ -36,9 +36,11 @@ public partial class FortniteReplayAnalyzer : Form
     private CheckBox? _chkTeamKillFeedOnly;
     private CheckBox? _chkTeamDamageOnly;
     private CheckBox? _chkDamagePlayers;
+    private CheckBox? _chkDamageBots;
     private CheckBox? _chkDamageStructures;
     private CheckBox? _chkDamageNpcs;
     private CheckBox? _chkPlayerDamagePlayers;
+    private CheckBox? _chkPlayerDamageBots;
     private CheckBox? _chkPlayerDamageStructures;
     private CheckBox? _chkPlayerDamageNpcs;
     private GroupBox? _grpPlayerDamageLog;
@@ -143,11 +145,13 @@ public partial class FortniteReplayAnalyzer : Form
 
         _chkTeamDamageOnly = CreateFilterCheckBox("Team members only", (_, _) => RefreshDamageEventViews());
         _chkDamagePlayers = CreateFilterCheckBox("Players", (_, _) => RefreshDamageEventViews(), true);
+        _chkDamageBots = CreateFilterCheckBox("Bots", (_, _) => RefreshDamageEventViews(), true);
         _chkDamageStructures = CreateFilterCheckBox("Structure", (_, _) => RefreshDamageEventViews(), true);
         _chkDamageNpcs = CreateFilterCheckBox("NPC", (_, _) => RefreshDamageEventViews(), true);
 
         damageFilterPanel.Controls.Add(_chkTeamDamageOnly);
         damageFilterPanel.Controls.Add(_chkDamagePlayers);
+        damageFilterPanel.Controls.Add(_chkDamageBots);
         damageFilterPanel.Controls.Add(_chkDamageStructures);
         damageFilterPanel.Controls.Add(_chkDamageNpcs);
 
@@ -169,9 +173,11 @@ public partial class FortniteReplayAnalyzer : Form
 
         var playerDamageFilterPanel = CreateFilterFlowPanel();
         _chkPlayerDamagePlayers = CreateFilterCheckBox("Players", (_, _) => RefreshDamageEventViews(), true);
+        _chkPlayerDamageBots = CreateFilterCheckBox("Bots", (_, _) => RefreshDamageEventViews(), true);
         _chkPlayerDamageStructures = CreateFilterCheckBox("Structure", (_, _) => RefreshDamageEventViews(), true);
         _chkPlayerDamageNpcs = CreateFilterCheckBox("NPC", (_, _) => RefreshDamageEventViews(), true);
         playerDamageFilterPanel.Controls.Add(_chkPlayerDamagePlayers);
+        playerDamageFilterPanel.Controls.Add(_chkPlayerDamageBots);
         playerDamageFilterPanel.Controls.Add(_chkPlayerDamageStructures);
         playerDamageFilterPanel.Controls.Add(_chkPlayerDamageNpcs);
 
@@ -1534,7 +1540,7 @@ public partial class FortniteReplayAnalyzer : Form
         }
 
         var category = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
-        return IsDamageCategoryEnabled(category, _chkDamagePlayers, _chkDamageStructures, _chkDamageNpcs);
+        return IsDamageCategoryEnabled(category, _chkDamagePlayers, _chkDamageBots, _chkDamageStructures, _chkDamageNpcs);
     }
 
     private bool ShouldIncludePlayerDamageEvent(FortniteReplay replay, PlayerData player, DamageEvent evt)
@@ -1543,15 +1549,15 @@ public partial class FortniteReplayAnalyzer : Form
             ? ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot)
             : ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot);
 
-        return IsDamageCategoryEnabled(category, _chkPlayerDamagePlayers, _chkPlayerDamageStructures, _chkPlayerDamageNpcs);
+        return IsDamageCategoryEnabled(category, _chkPlayerDamagePlayers, _chkPlayerDamageBots, _chkPlayerDamageStructures, _chkPlayerDamageNpcs);
     }
 
-    private static bool IsDamageCategoryEnabled(DamageParticipantCategory category, CheckBox? players, CheckBox? structures, CheckBox? npcs)
+    private static bool IsDamageCategoryEnabled(DamageParticipantCategory category, CheckBox? players, CheckBox? bots, CheckBox? structures, CheckBox? npcs)
     {
         return category switch
         {
             DamageParticipantCategory.Player => players?.Checked ?? true,
-            DamageParticipantCategory.Bot => players?.Checked ?? true,
+            DamageParticipantCategory.Bot => bots?.Checked ?? true,
             DamageParticipantCategory.Npc => npcs?.Checked ?? true,
             _ => structures?.Checked ?? true
         };
