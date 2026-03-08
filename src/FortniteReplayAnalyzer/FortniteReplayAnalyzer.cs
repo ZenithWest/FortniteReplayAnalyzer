@@ -404,7 +404,7 @@ public partial class FortniteReplayAnalyzer : Form
             TargetId = targetPlayer?.Id ?? entry.PlayerId,
             TargetLookupKey = targetPlayer?.PlayerId ?? entry.PlayerName,
             EventText = GetKillFeedEventText(entry),
-            DistanceText = entry.Distance.HasValue ? $"{entry.Distance.Value:0} m" : "-"
+            DistanceText = FormatDistance(entry.Distance)
         };
     }
 
@@ -580,7 +580,7 @@ public partial class FortniteReplayAnalyzer : Form
                     PlayerName = ResolvePlayerName(victim, entry.PlayerId, entry.PlayerName),
                     EventText = GetKillFeedEventText(entry),
                     TimeText = FormatMatchClock(GetKillFeedTime(entry)),
-                    DistanceText = entry.Distance.HasValue ? $"{entry.Distance.Value:0} m" : "-"
+                    DistanceText = FormatDistance(entry.Distance)
                 };
             });
     }
@@ -855,6 +855,16 @@ public partial class FortniteReplayAnalyzer : Form
         return duration.TotalHours >= 1 ? duration.ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture) : duration.ToString(@"m\:ss", CultureInfo.InvariantCulture);
     }
 
+    private static string FormatDistance(float? rawDistance)
+    {
+        if (!rawDistance.HasValue)
+        {
+            return "-";
+        }
+
+        return $"{rawDistance.Value / 100f:0.00} m";
+    }
+
     private static string FormatVector(object? vector)
     {
         if (vector is null)
@@ -865,4 +875,5 @@ public partial class FortniteReplayAnalyzer : Form
         return vector.ToString() ?? "-";
     }
 }
+
 
