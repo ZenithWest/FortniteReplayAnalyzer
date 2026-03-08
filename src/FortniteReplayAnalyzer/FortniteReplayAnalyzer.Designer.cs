@@ -33,6 +33,8 @@ partial class FortniteReplayAnalyzer
         dgvGameStats = new DataGridView();
         grpKillFeed = new GroupBox();
         dgvKillFeed = new DataGridView();
+        grpCombatEvents = new GroupBox();
+        dgvCombatEvents = new DataGridView();
         grpPlayers = new GroupBox();
         dgvPlayers = new DataGridView();
         playerPanelLayout = new TableLayoutPanel();
@@ -62,6 +64,8 @@ partial class FortniteReplayAnalyzer
         ((System.ComponentModel.ISupportInitialize)dgvGameStats).BeginInit();
         grpKillFeed.SuspendLayout();
         ((System.ComponentModel.ISupportInitialize)dgvKillFeed).BeginInit();
+        grpCombatEvents.SuspendLayout();
+        ((System.ComponentModel.ISupportInitialize)dgvCombatEvents).BeginInit();
         grpPlayers.SuspendLayout();
         ((System.ComponentModel.ISupportInitialize)dgvPlayers).BeginInit();
         playerPanelLayout.SuspendLayout();
@@ -195,15 +199,17 @@ partial class FortniteReplayAnalyzer
         centerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         centerLayout.Controls.Add(grpGameStats, 0, 0);
         centerLayout.Controls.Add(grpKillFeed, 0, 1);
-        centerLayout.Controls.Add(grpPlayers, 0, 2);
+        centerLayout.Controls.Add(grpCombatEvents, 0, 2);
+        centerLayout.Controls.Add(grpPlayers, 0, 3);
         centerLayout.Dock = DockStyle.Fill;
         centerLayout.Location = new Point(0, 0);
         centerLayout.Name = "centerLayout";
         centerLayout.Padding = new Padding(10);
-        centerLayout.RowCount = 3;
+        centerLayout.RowCount = 4;
+        centerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 22F));
         centerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 28F));
-        centerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 36F));
-        centerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 36F));
+        centerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 24F));
+        centerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 26F));
         centerLayout.Size = new Size(460, 980);
         centerLayout.TabIndex = 0;
         // 
@@ -215,7 +221,7 @@ partial class FortniteReplayAnalyzer
         grpGameStats.Location = new Point(13, 13);
         grpGameStats.Name = "grpGameStats";
         grpGameStats.Padding = new Padding(10);
-        grpGameStats.Size = new Size(434, 258);
+        grpGameStats.Size = new Size(434, 207);
         grpGameStats.TabIndex = 0;
         grpGameStats.TabStop = false;
         grpGameStats.Text = "Game Stats";
@@ -226,7 +232,7 @@ partial class FortniteReplayAnalyzer
         dgvGameStats.Dock = DockStyle.Fill;
         dgvGameStats.Location = new Point(10, 33);
         dgvGameStats.Name = "dgvGameStats";
-        dgvGameStats.Size = new Size(414, 215);
+        dgvGameStats.Size = new Size(414, 164);
         dgvGameStats.TabIndex = 0;
         // 
         // grpKillFeed
@@ -234,10 +240,10 @@ partial class FortniteReplayAnalyzer
         grpKillFeed.Controls.Add(dgvKillFeed);
         grpKillFeed.Dock = DockStyle.Fill;
         grpKillFeed.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
-        grpKillFeed.Location = new Point(13, 277);
+        grpKillFeed.Location = new Point(13, 226);
         grpKillFeed.Name = "grpKillFeed";
         grpKillFeed.Padding = new Padding(10);
-        grpKillFeed.Size = new Size(434, 331);
+        grpKillFeed.Size = new Size(434, 262);
         grpKillFeed.TabIndex = 1;
         grpKillFeed.TabStop = false;
         grpKillFeed.Text = "Kill Feed";
@@ -248,19 +254,41 @@ partial class FortniteReplayAnalyzer
         dgvKillFeed.Dock = DockStyle.Fill;
         dgvKillFeed.Location = new Point(10, 33);
         dgvKillFeed.Name = "dgvKillFeed";
-        dgvKillFeed.Size = new Size(414, 288);
+        dgvKillFeed.Size = new Size(414, 219);
         dgvKillFeed.TabIndex = 0;
+        // 
+        // grpCombatEvents
+        // 
+        grpCombatEvents.Controls.Add(dgvCombatEvents);
+        grpCombatEvents.Dock = DockStyle.Fill;
+        grpCombatEvents.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
+        grpCombatEvents.Location = new Point(13, 494);
+        grpCombatEvents.Name = "grpCombatEvents";
+        grpCombatEvents.Padding = new Padding(10);
+        grpCombatEvents.Size = new Size(434, 224);
+        grpCombatEvents.TabIndex = 2;
+        grpCombatEvents.TabStop = false;
+        grpCombatEvents.Text = "Combat Events";
+        // 
+        // dgvCombatEvents
+        // 
+        dgvCombatEvents.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+        dgvCombatEvents.Dock = DockStyle.Fill;
+        dgvCombatEvents.Location = new Point(10, 33);
+        dgvCombatEvents.Name = "dgvCombatEvents";
+        dgvCombatEvents.Size = new Size(414, 181);
+        dgvCombatEvents.TabIndex = 0;
         // 
         // grpPlayers
         // 
         grpPlayers.Controls.Add(dgvPlayers);
         grpPlayers.Dock = DockStyle.Fill;
         grpPlayers.Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold);
-        grpPlayers.Location = new Point(13, 614);
+        grpPlayers.Location = new Point(13, 724);
         grpPlayers.Name = "grpPlayers";
         grpPlayers.Padding = new Padding(10);
-        grpPlayers.Size = new Size(434, 353);
-        grpPlayers.TabIndex = 2;
+        grpPlayers.Size = new Size(434, 243);
+        grpPlayers.TabIndex = 3;
         grpPlayers.TabStop = false;
         grpPlayers.Text = "Player List";
         // 
@@ -270,7 +298,7 @@ partial class FortniteReplayAnalyzer
         dgvPlayers.Dock = DockStyle.Fill;
         dgvPlayers.Location = new Point(10, 33);
         dgvPlayers.Name = "dgvPlayers";
-        dgvPlayers.Size = new Size(414, 310);
+        dgvPlayers.Size = new Size(414, 200);
         dgvPlayers.TabIndex = 0;
         // 
         // playerPanelLayout
@@ -430,6 +458,8 @@ partial class FortniteReplayAnalyzer
         ((System.ComponentModel.ISupportInitialize)dgvGameStats).EndInit();
         grpKillFeed.ResumeLayout(false);
         ((System.ComponentModel.ISupportInitialize)dgvKillFeed).EndInit();
+        grpCombatEvents.ResumeLayout(false);
+        ((System.ComponentModel.ISupportInitialize)dgvCombatEvents).EndInit();
         grpPlayers.ResumeLayout(false);
         ((System.ComponentModel.ISupportInitialize)dgvPlayers).EndInit();
         playerPanelLayout.ResumeLayout(false);
@@ -461,6 +491,8 @@ partial class FortniteReplayAnalyzer
     private DataGridView dgvGameStats;
     private GroupBox grpKillFeed;
     private DataGridView dgvKillFeed;
+    private GroupBox grpCombatEvents;
+    private DataGridView dgvCombatEvents;
     private GroupBox grpPlayers;
     private DataGridView dgvPlayers;
     private TableLayoutPanel playerPanelLayout;

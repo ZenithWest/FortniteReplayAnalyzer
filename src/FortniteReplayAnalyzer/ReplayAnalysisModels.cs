@@ -67,6 +67,23 @@ internal sealed class KillFeedRow
     public required string DistanceText { get; init; }
 }
 
+internal sealed class CombatEventRow
+{
+    public required double TimeValue { get; init; }
+    public required string TimeText { get; init; }
+    public required string AttackerName { get; init; }
+    public int? AttackerId { get; init; }
+    public string? AttackerLookupKey { get; init; }
+    public required string TargetName { get; init; }
+    public int? TargetId { get; init; }
+    public string? TargetLookupKey { get; init; }
+    public required string DamageText { get; init; }
+    public required string ShieldText { get; init; }
+    public required string FatalText { get; init; }
+    public required string CriticalText { get; init; }
+    public required string LocationText { get; init; }
+}
+
 internal sealed class DetailRow
 {
     public DetailRow(string label, string value)

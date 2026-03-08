@@ -53,6 +53,7 @@ public partial class FortniteReplayAnalyzer : Form
         };
 
         dgvKillFeed.CellContentClick += (_, e) => HandleKillFeedLinkClick(e);
+        dgvCombatEvents.CellContentClick += (_, e) => HandleCombatEventLinkClick(e);
         dgvPlayers.CellContentClick += (_, e) => HandlePlayerLinkClick(e);
         dgvPlayers.SelectionChanged += (_, _) => HandlePlayerSelectionChanged();
         dgvPlayers.ColumnHeaderMouseClick += (_, e) => SortPlayerRows(dgvPlayers.Columns[e.ColumnIndex].Name);
@@ -63,6 +64,7 @@ public partial class FortniteReplayAnalyzer : Form
         ConfigureReadOnlyGrid(dgvReplayBrowser, fullRowSelect: true);
         ConfigureReadOnlyGrid(dgvGameStats, fullRowSelect: false);
         ConfigureReadOnlyGrid(dgvKillFeed, fullRowSelect: true);
+        ConfigureReadOnlyGrid(dgvCombatEvents, fullRowSelect: true);
         ConfigureReadOnlyGrid(dgvPlayers, fullRowSelect: true);
         ConfigureReadOnlyGrid(dgvPlayerOverview, fullRowSelect: false);
         ConfigureReadOnlyGrid(dgvPlayerCombatLog, fullRowSelect: true);
@@ -76,6 +78,7 @@ public partial class FortniteReplayAnalyzer : Form
         dgvReplayBrowser.AutoGenerateColumns = false;
         dgvGameStats.AutoGenerateColumns = false;
         dgvKillFeed.AutoGenerateColumns = false;
+        dgvCombatEvents.AutoGenerateColumns = false;
         dgvPlayers.AutoGenerateColumns = false;
         dgvPlayerOverview.AutoGenerateColumns = false;
         dgvPlayerCombatLog.AutoGenerateColumns = false;
@@ -84,6 +87,7 @@ public partial class FortniteReplayAnalyzer : Form
         BuildReplayBrowserColumns();
         BuildGameStatsColumns();
         BuildKillFeedColumns(dgvKillFeed);
+        BuildCombatEventColumns();
         BuildPlayerColumns();
         BuildGameStatsColumns(dgvPlayerOverview);
         BuildKillFeedColumns(dgvPlayerCombatLog);
@@ -136,6 +140,19 @@ public partial class FortniteReplayAnalyzer : Form
         grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
     }
 
+    private void BuildCombatEventColumns()
+    {
+        dgvCombatEvents.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.TimeText), HeaderText = "Time", DataPropertyName = nameof(CombatEventRow.TimeText), FillWeight = 60 });
+        dgvCombatEvents.Columns.Add(new DataGridViewLinkColumn { Name = nameof(CombatEventRow.AttackerName), HeaderText = "Attacker", DataPropertyName = nameof(CombatEventRow.AttackerName), FillWeight = 110, TrackVisitedState = false, UseColumnTextForLinkValue = false });
+        dgvCombatEvents.Columns.Add(new DataGridViewLinkColumn { Name = nameof(CombatEventRow.TargetName), HeaderText = "Target", DataPropertyName = nameof(CombatEventRow.TargetName), FillWeight = 110, TrackVisitedState = false, UseColumnTextForLinkValue = false });
+        dgvCombatEvents.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.DamageText), HeaderText = "Damage", DataPropertyName = nameof(CombatEventRow.DamageText), FillWeight = 70 });
+        dgvCombatEvents.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.ShieldText), HeaderText = "Shield", DataPropertyName = nameof(CombatEventRow.ShieldText), FillWeight = 65 });
+        dgvCombatEvents.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.FatalText), HeaderText = "Fatal", DataPropertyName = nameof(CombatEventRow.FatalText), FillWeight = 60 });
+        dgvCombatEvents.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.CriticalText), HeaderText = "Crit", DataPropertyName = nameof(CombatEventRow.CriticalText), FillWeight = 55 });
+        dgvCombatEvents.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.LocationText), HeaderText = "Location", DataPropertyName = nameof(CombatEventRow.LocationText), FillWeight = 140 });
+        dgvCombatEvents.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+    }
+
     private void BuildPlayerColumns()
     {
         dgvPlayers.Columns.Add(new DataGridViewLinkColumn { Name = nameof(PlayerSummaryRow.DisplayName), HeaderText = "Player", DataPropertyName = nameof(PlayerSummaryRow.DisplayName), FillWeight = 170, TrackVisitedState = false, UseColumnTextForLinkValue = false });
@@ -146,7 +163,6 @@ public partial class FortniteReplayAnalyzer : Form
         dgvPlayers.Columns.Add(new DataGridViewCheckBoxColumn { Name = nameof(PlayerSummaryRow.IsBot), HeaderText = "Bot", DataPropertyName = nameof(PlayerSummaryRow.IsBot), FillWeight = 45 });
         dgvPlayers.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
     }
-
     private void BuildPlayerVictimColumns()
     {
         dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.PlayerName), HeaderText = "Player", DataPropertyName = nameof(PlayerVictimRow.PlayerName), FillWeight = 170 });
@@ -258,7 +274,7 @@ public partial class FortniteReplayAnalyzer : Form
         catch (Exception ex)
         {
             row.Replay = null;
-            row.Status = $"Error";
+            row.Status = "Error";
             row.SummaryLoaded = true;
             row.Duration = TimeSpan.Zero;
             row.DurationText = "-";
@@ -318,6 +334,7 @@ public partial class FortniteReplayAnalyzer : Form
 
         dgvGameStats.DataSource = BuildReplayDetails(row).ToList();
         BuildKillFeed(row.Replay);
+        BuildCombatEvents(row.Replay);
         BuildPlayerList(row.Replay);
 
         var defaultPlayer = ResolveDefaultPlayer(row.Replay);
@@ -361,20 +378,28 @@ public partial class FortniteReplayAnalyzer : Form
             .ToList();
     }
 
+    private void BuildCombatEvents(FortniteReplay replay)
+    {
+        dgvCombatEvents.DataSource = replay.DamageEvents
+            .Select(evt => CreateCombatEventRow(replay, evt))
+            .OrderBy(row => row.TimeValue)
+            .ToList();
+    }
+
     private KillFeedRow CreateKillFeedRow(FortniteReplay replay, KillFeedEntry entry)
     {
-        var actorPlayer = FindPlayer(replay, entry.FinisherOrDowner, entry.FinisherOrDownerName);
+        var actorReference = ResolveKillFeedActorReference(replay, entry);
         var targetPlayer = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
-        var timeValue = entry.ReplicatedWorldTimeSecondsDouble ?? entry.ReplicatedWorldTimeSeconds ?? 0;
+        var timeValue = GetKillFeedTime(entry);
 
         return new KillFeedRow
         {
             Entry = entry,
             TimeValue = timeValue,
             TimeText = FormatMatchClock(timeValue),
-            ActorName = ResolvePlayerName(actorPlayer, entry.FinisherOrDowner, entry.FinisherOrDownerName),
-            ActorId = actorPlayer?.Id ?? entry.FinisherOrDowner,
-            ActorLookupKey = actorPlayer?.PlayerId ?? entry.FinisherOrDownerName,
+            ActorName = ResolvePlayerName(actorReference.Player, actorReference.NumericId, actorReference.LookupKey),
+            ActorId = actorReference.NumericId,
+            ActorLookupKey = actorReference.LookupKey,
             TargetName = ResolvePlayerName(targetPlayer, entry.PlayerId, entry.PlayerName),
             TargetId = targetPlayer?.Id ?? entry.PlayerId,
             TargetLookupKey = targetPlayer?.PlayerId ?? entry.PlayerName,
@@ -383,6 +408,29 @@ public partial class FortniteReplayAnalyzer : Form
         };
     }
 
+    private CombatEventRow CreateCombatEventRow(FortniteReplay replay, DamageEvent evt)
+    {
+        var attacker = FindPlayer(replay, evt.InstigatorId, evt.InstigatorName);
+        var target = FindPlayer(replay, evt.TargetId, evt.TargetName);
+        var timeValue = GetDamageTime(evt);
+
+        return new CombatEventRow
+        {
+            TimeValue = timeValue,
+            TimeText = FormatMatchClock(timeValue),
+            AttackerName = ResolvePlayerName(attacker, evt.InstigatorId, evt.InstigatorName),
+            AttackerId = attacker?.Id ?? evt.InstigatorId,
+            AttackerLookupKey = attacker?.PlayerId ?? evt.InstigatorName,
+            TargetName = ResolvePlayerName(target, evt.TargetId, evt.TargetName),
+            TargetId = target?.Id ?? evt.TargetId,
+            TargetLookupKey = target?.PlayerId ?? evt.TargetName,
+            DamageText = evt.Magnitude.HasValue ? evt.Magnitude.Value.ToString("0.#", CultureInfo.CurrentCulture) : "-",
+            ShieldText = evt.IsShield switch { true => "Yes", false => "No", _ => "-" },
+            FatalText = FormatBool(evt.IsFatal),
+            CriticalText = FormatBool(evt.IsCritical),
+            LocationText = FormatVector(evt.Location)
+        };
+    }
     private void BuildPlayerList(FortniteReplay replay)
     {
         _playerRows.Clear();
@@ -439,6 +487,24 @@ public partial class FortniteReplayAnalyzer : Form
         }
     }
 
+    private void HandleCombatEventLinkClick(DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || _selectedReplayRow?.Replay is null || dgvCombatEvents.Rows[e.RowIndex].DataBoundItem is not CombatEventRow row)
+        {
+            return;
+        }
+
+        if (dgvCombatEvents.Columns[e.ColumnIndex].Name == nameof(CombatEventRow.AttackerName))
+        {
+            ShowPlayerDetails(FindPlayer(_selectedReplayRow.Replay, row.AttackerId, row.AttackerLookupKey));
+        }
+
+        if (dgvCombatEvents.Columns[e.ColumnIndex].Name == nameof(CombatEventRow.TargetName))
+        {
+            ShowPlayerDetails(FindPlayer(_selectedReplayRow.Replay, row.TargetId, row.TargetLookupKey));
+        }
+    }
+
     private void ShowPlayerDetails(PlayerData? player)
     {
         _selectedPlayer = player;
@@ -463,9 +529,10 @@ public partial class FortniteReplayAnalyzer : Form
     {
         var deathEvent = replay.KillFeed
             .Where(entry => MatchesPlayer(player, entry.PlayerId, entry.PlayerName) && !entry.IsRevived)
-            .OrderByDescending(entry => entry.ReplicatedWorldTimeSecondsDouble ?? entry.ReplicatedWorldTimeSeconds ?? 0)
+            .OrderByDescending(GetKillFeedTime)
             .FirstOrDefault();
 
+        (PlayerData? Player, int? NumericId, string? LookupKey)? eliminatedBy = deathEvent is null ? null : ResolveKillFeedActorReference(replay, deathEvent);
         var hitsGiven = replay.DamageEvents.Count(evt => MatchesPlayer(player, evt.InstigatorId, evt.InstigatorName));
         var hitsTaken = replay.DamageEvents.Count(evt => MatchesPlayer(player, evt.TargetId, evt.TargetName));
 
@@ -486,8 +553,8 @@ public partial class FortniteReplayAnalyzer : Form
         yield return new DetailRow("Pickaxe", player.Cosmetics.Pickaxe ?? "-");
         yield return new DetailRow("Glider", player.Cosmetics.Glider ?? "-");
         yield return new DetailRow("Death Cause", FormatNullable(player.DeathCause));
-        yield return new DetailRow("Death Time", deathEvent is null ? "-" : FormatMatchClock(deathEvent.ReplicatedWorldTimeSecondsDouble ?? deathEvent.ReplicatedWorldTimeSeconds ?? 0));
-        yield return new DetailRow("Eliminated By", deathEvent is null ? "-" : ResolvePlayerName(FindPlayer(replay, deathEvent.FinisherOrDowner, deathEvent.FinisherOrDownerName), deathEvent.FinisherOrDowner, deathEvent.FinisherOrDownerName));
+        yield return new DetailRow("Death Time", deathEvent is null ? "-" : FormatMatchClock(GetKillFeedTime(deathEvent)));
+        yield return new DetailRow("Eliminated By", !eliminatedBy.HasValue ? "-" : ResolvePlayerName(eliminatedBy.Value.Player, eliminatedBy.Value.NumericId, eliminatedBy.Value.LookupKey));
         yield return new DetailRow("Damage Events Given", hitsGiven.ToString(CultureInfo.CurrentCulture));
         yield return new DetailRow("Damage Events Taken", hitsTaken.ToString(CultureInfo.CurrentCulture));
     }
@@ -495,7 +562,7 @@ public partial class FortniteReplayAnalyzer : Form
     private IEnumerable<KillFeedRow> BuildPlayerCombatLog(FortniteReplay replay, PlayerData player)
     {
         return replay.KillFeed
-            .Where(entry => MatchesPlayer(player, entry.PlayerId, entry.PlayerName) || MatchesPlayer(player, entry.FinisherOrDowner, entry.FinisherOrDownerName))
+            .Where(entry => MatchesPlayer(player, entry.PlayerId, entry.PlayerName) || MatchesResolvedKillFeedActor(replay, player, entry))
             .Select(entry => CreateKillFeedRow(replay, entry))
             .OrderBy(entry => entry.TimeValue);
     }
@@ -503,8 +570,8 @@ public partial class FortniteReplayAnalyzer : Form
     private IEnumerable<PlayerVictimRow> BuildPlayerVictimRows(FortniteReplay replay, PlayerData player)
     {
         return replay.KillFeed
-            .Where(entry => MatchesPlayer(player, entry.FinisherOrDowner, entry.FinisherOrDownerName))
-            .OrderBy(entry => entry.ReplicatedWorldTimeSecondsDouble ?? entry.ReplicatedWorldTimeSeconds ?? 0)
+            .Where(entry => MatchesResolvedKillFeedActor(replay, player, entry))
+            .OrderBy(GetKillFeedTime)
             .Select(entry =>
             {
                 var victim = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
@@ -512,7 +579,7 @@ public partial class FortniteReplayAnalyzer : Form
                 {
                     PlayerName = ResolvePlayerName(victim, entry.PlayerId, entry.PlayerName),
                     EventText = GetKillFeedEventText(entry),
-                    TimeText = FormatMatchClock(entry.ReplicatedWorldTimeSecondsDouble ?? entry.ReplicatedWorldTimeSeconds ?? 0),
+                    TimeText = FormatMatchClock(GetKillFeedTime(entry)),
                     DistanceText = entry.Distance.HasValue ? $"{entry.Distance.Value:0} m" : "-"
                 };
             });
@@ -528,6 +595,7 @@ public partial class FortniteReplayAnalyzer : Form
         _selectedPlayer = null;
         dgvGameStats.DataSource = new List<DetailRow>();
         dgvKillFeed.DataSource = new List<KillFeedRow>();
+        dgvCombatEvents.DataSource = new List<CombatEventRow>();
         dgvPlayers.DataSource = new List<PlayerSummaryRow>();
         dgvPlayerOverview.DataSource = new List<DetailRow>();
         dgvPlayerCombatLog.DataSource = new List<KillFeedRow>();
@@ -580,7 +648,6 @@ public partial class FortniteReplayAnalyzer : Form
 
         BindReplayRows();
     }
-
     private IEnumerable<ReplayBrowserRow> OrderReplayRows()
     {
         Func<ReplayBrowserRow, object?> selector = _replaySortColumn switch
@@ -671,6 +738,59 @@ public partial class FortniteReplayAnalyzer : Form
         return !string.IsNullOrWhiteSpace(playerLookupKey) && string.Equals(player.PlayerId, playerLookupKey, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool MatchesKillFeedTarget(KillFeedEntry entry, int? playerId, string? playerLookupKey)
+    {
+        if (playerId.HasValue && entry.PlayerId == playerId)
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(playerLookupKey) && string.Equals(entry.PlayerName, playerLookupKey, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesResolvedKillFeedActor(FortniteReplay replay, PlayerData player, KillFeedEntry entry)
+    {
+        var actorReference = ResolveKillFeedActorReference(replay, entry);
+        return MatchesPlayer(player, actorReference.NumericId, actorReference.LookupKey);
+    }
+
+    private static (PlayerData? Player, int? NumericId, string? LookupKey) ResolveKillFeedActorReference(FortniteReplay replay, KillFeedEntry entry)
+    {
+        var directActor = FindPlayer(replay, entry.FinisherOrDowner, entry.FinisherOrDownerName);
+        if (directActor is not null || entry.FinisherOrDowner.HasValue || !string.IsNullOrWhiteSpace(entry.FinisherOrDownerName))
+        {
+            return (directActor, directActor?.Id ?? entry.FinisherOrDowner, directActor?.PlayerId ?? entry.FinisherOrDownerName);
+        }
+
+        if (entry.IsDowned || entry.IsRevived)
+        {
+            return (null, null, null);
+        }
+
+        var currentTime = GetKillFeedTime(entry);
+        var priorEntries = replay.KillFeed
+            .Where(candidate => !ReferenceEquals(candidate, entry) && MatchesKillFeedTarget(candidate, entry.PlayerId, entry.PlayerName) && GetKillFeedTime(candidate) <= currentTime)
+            .OrderByDescending(GetKillFeedTime);
+
+        foreach (var priorEntry in priorEntries)
+        {
+            if (priorEntry.IsRevived)
+            {
+                break;
+            }
+
+            if (priorEntry.IsDowned)
+            {
+                var inferredActor = FindPlayer(replay, priorEntry.FinisherOrDowner, priorEntry.FinisherOrDownerName);
+                return (inferredActor, inferredActor?.Id ?? priorEntry.FinisherOrDowner, inferredActor?.PlayerId ?? priorEntry.FinisherOrDownerName);
+            }
+
+            break;
+        }
+
+        return (null, null, null);
+    }
+
     private static string ResolvePlayerName(PlayerData? player, int? numericId, string? fallback = null)
     {
         if (player is not null)
@@ -705,6 +825,10 @@ public partial class FortniteReplayAnalyzer : Form
 
     private static string GetKillFeedEventText(KillFeedEntry entry) => entry.IsRevived ? "Revived" : entry.IsDowned ? "Downed" : "Eliminated";
 
+    private static double GetKillFeedTime(KillFeedEntry entry) => entry.ReplicatedWorldTimeSecondsDouble ?? entry.ReplicatedWorldTimeSeconds ?? 0;
+
+    private static double GetDamageTime(DamageEvent evt) => evt.ReplicatedWorldTimeSecondsDouble ?? evt.ReplicatedWorldTimeSeconds ?? 0;
+
     private static string FormatNullable(object? value)
     {
         return value switch
@@ -730,4 +854,15 @@ public partial class FortniteReplayAnalyzer : Form
 
         return duration.TotalHours >= 1 ? duration.ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture) : duration.ToString(@"m\:ss", CultureInfo.InvariantCulture);
     }
+
+    private static string FormatVector(object? vector)
+    {
+        if (vector is null)
+        {
+            return "-";
+        }
+
+        return vector.ToString() ?? "-";
+    }
 }
+
