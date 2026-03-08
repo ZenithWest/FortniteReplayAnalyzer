@@ -68,6 +68,7 @@ public partial class FortniteReplayAnalyzer : Form
     {
         InitializeMenuStrip();
         Size = new Size(1800, 900);
+        replayBrowserLayout.Padding = new Padding(0, 8, 0, 0);
         splitMain.Panel1MinSize = CollapsedReplayPaneWidth;
         splitMain.SplitterWidth = 8;
         splitMain.BackColor = Color.FromArgb(184, 194, 208);
@@ -1682,7 +1683,10 @@ public partial class FortniteReplayAnalyzer : Form
 
     private static void AddPanelTab(TabControl tabControl, string title, Control content)
     {
-        var page = new TabPage(title);
+        var page = new TabPage(title)
+        {
+            Padding = new Padding(0, 8, 0, 0)
+        };
         content.Parent?.Controls.Remove(content);
         page.Controls.Add(content);
         content.Dock = DockStyle.Fill;
