@@ -21,6 +21,8 @@ public class DamageEvent
     public bool? IsShieldDestroyed { get; set; }
     public bool? IsShieldApplied { get; set; }
     public bool? IsBallistic { get; set; }
+    public string? WeaponName { get; set; }
+    public string? WeaponType { get; set; }
     public FVector? Location { get; set; }
     public FVector? Normal { get; set; }
     public FVector? TraceStart { get; set; }

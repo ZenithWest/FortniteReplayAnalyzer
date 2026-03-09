@@ -1,3 +1,4 @@
+using System.Drawing;
 using FortniteReplayReader.Models;
 using Unreal.Core.Models.Enums;
 
@@ -58,6 +59,7 @@ internal sealed class PlayerSummaryRow
 internal sealed class KillFeedRow
 {
     public required KillFeedEntry Entry { get; init; }
+    public Image? ActorIcon { get; init; }
     public required double TimeValue { get; init; }
     public required string TimeText { get; init; }
     public required string ActorName { get; init; }
@@ -82,6 +84,7 @@ internal sealed class CombatEventRow
     public string? TargetLookupKey { get; init; }
     public required string EventText { get; init; }
     public required string DamageText { get; init; }
+    public required string WeaponTypeText { get; init; }
     public required string ShieldText { get; init; }
     public required string FatalText { get; init; }
     public required string CriticalText { get; init; }

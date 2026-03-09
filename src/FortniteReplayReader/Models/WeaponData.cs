@@ -2,6 +2,9 @@
 
 public class WeaponData
 {
+    public uint? ChannelId { get; set; }
+    public uint? OwnerActor { get; set; }
+    public uint? InstigatorActor { get; set; }
     public bool? bIsEquippingWeapon { get; set; }
     public bool? bIsReloadingWeapon { get; set; }
     public string WeaponName { get; set; }

@@ -280,6 +280,7 @@ public partial class FortniteReplayAnalyzer : Form
         splitMain.Panel2.Controls.Add(_openedReplayTabs);
         splitMain.SplitterDistance = ExpandedReplayPaneWidth;
         UpdateReplayBrowserHeaderChrome();
+        InitializeAdvancedAnalysisUi();
     }
 
     private void InitializeReplayBrowserContextMenu()
@@ -491,6 +492,7 @@ public partial class FortniteReplayAnalyzer : Form
     private static void BuildKillFeedColumns(DataGridView grid)
     {
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(KillFeedRow.TimeText), HeaderText = "Time", DataPropertyName = nameof(KillFeedRow.TimeText), FillWeight = 65 });
+        grid.Columns.Add(new DataGridViewImageColumn { Name = nameof(KillFeedRow.ActorIcon), HeaderText = "", DataPropertyName = nameof(KillFeedRow.ActorIcon), ImageLayout = DataGridViewImageCellLayout.Zoom, FillWeight = 42 });
         grid.Columns.Add(new DataGridViewLinkColumn { Name = nameof(KillFeedRow.ActorName), HeaderText = "Actor", DataPropertyName = nameof(KillFeedRow.ActorName), FillWeight = 130, TrackVisitedState = false, UseColumnTextForLinkValue = false });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(KillFeedRow.EventText), HeaderText = "Event", DataPropertyName = nameof(KillFeedRow.EventText), FillWeight = 85 });
         grid.Columns.Add(new DataGridViewLinkColumn { Name = nameof(KillFeedRow.TargetName), HeaderText = "Target", DataPropertyName = nameof(KillFeedRow.TargetName), FillWeight = 130, TrackVisitedState = false, UseColumnTextForLinkValue = false });
@@ -504,6 +506,7 @@ public partial class FortniteReplayAnalyzer : Form
         grid.Columns.Add(new DataGridViewLinkColumn { Name = nameof(CombatEventRow.AttackerName), HeaderText = "Attacker", DataPropertyName = nameof(CombatEventRow.AttackerName), FillWeight = 130, TrackVisitedState = false, UseColumnTextForLinkValue = false });
         grid.Columns.Add(new DataGridViewLinkColumn { Name = nameof(CombatEventRow.TargetName), HeaderText = "Target", DataPropertyName = nameof(CombatEventRow.TargetName), FillWeight = 130, TrackVisitedState = false, UseColumnTextForLinkValue = false });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.DamageText), HeaderText = "Damage", DataPropertyName = nameof(CombatEventRow.DamageText), FillWeight = 72 });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.WeaponTypeText), HeaderText = "Weapon", DataPropertyName = nameof(CombatEventRow.WeaponTypeText), FillWeight = 88 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.ShieldText), HeaderText = "Shield", DataPropertyName = nameof(CombatEventRow.ShieldText), FillWeight = 62 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.FatalText), HeaderText = "Fatal", DataPropertyName = nameof(CombatEventRow.FatalText), FillWeight = 58 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.CriticalText), HeaderText = "Crit", DataPropertyName = nameof(CombatEventRow.CriticalText), FillWeight = 54 });
@@ -794,6 +797,7 @@ public partial class FortniteReplayAnalyzer : Form
 
         var defaultPlayer = ResolveDefaultPlayer(row.Replay);
         ShowPlayerDetails(defaultPlayer);
+        UpdateDamageTimelineChart();
     }
 
     private static PlayerData? ResolveDefaultPlayer(FortniteReplay replay)
@@ -855,6 +859,7 @@ public partial class FortniteReplayAnalyzer : Form
         return new KillFeedRow
         {
             Entry = entry,
+            ActorIcon = GetPlayerSkinIcon(actorReference.Player),
             TimeValue = timeValue,
             TimeText = FormatMatchClock(timeValue),
             ActorName = ResolvePlayerName(actorReference.Player, actorReference.NumericId, actorReference.LookupKey),
@@ -886,11 +891,47 @@ public partial class FortniteReplayAnalyzer : Form
             TargetLookupKey = target?.PlayerId ?? evt.TargetName,
             EventText = evt.EventTag ?? evt.EventSource ?? "-",
             DamageText = evt.Magnitude.HasValue ? evt.Magnitude.Value.ToString("0.#", CultureInfo.CurrentCulture) : "-",
+            WeaponTypeText = FormatWeaponType(evt),
             ShieldText = evt.IsShield switch { true => "Yes", false => "No", _ => "-" },
             FatalText = FormatBool(evt.IsFatal),
             CriticalText = FormatBool(evt.IsCritical),
             LocationText = FormatVector(evt.Location)
         };
+    }
+
+    private Image? GetPlayerSkinIcon(PlayerData? player)
+    {
+        var cosmeticId = player?.Cosmetics?.Character;
+        if (string.IsNullOrWhiteSpace(cosmeticId))
+        {
+            return null;
+        }
+
+        var cached = CosmeticIconCache.LoadCachedImage(cosmeticId);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            var cachePath = await CosmeticIconCache.EnsureIconAsync(cosmeticId);
+            if (string.IsNullOrWhiteSpace(cachePath) || IsDisposed)
+            {
+                return;
+            }
+
+            BeginInvoke(() =>
+            {
+                if (_selectedReplayRow?.Replay is not null)
+                {
+                    BuildKillFeed(_selectedReplayRow.Replay);
+                    RefreshPlayerKillLog();
+                }
+            });
+        });
+
+        return null;
     }
     private void BuildPlayerList(FortniteReplay replay)
     {
@@ -1367,6 +1408,21 @@ public partial class FortniteReplayAnalyzer : Form
         return ShortenIdentifier(fallback);
     }
 
+    private static string FormatWeaponType(DamageEvent evt)
+    {
+        if (!string.IsNullOrWhiteSpace(evt.WeaponType))
+        {
+            return evt.WeaponType!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.WeaponName))
+        {
+            return evt.WeaponName!;
+        }
+
+        return "-";
+    }
+
 
 
     private static bool TryParseReplayTimestampFromFileName(string fileName, out DateTime timestamp)
@@ -1726,7 +1782,7 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void CloseAllReplayFiles()
     {
-        if (ReferenceEquals(splitContent.Parent, _openedReplayTabs?.SelectedTab))
+        if (_openedReplayTabs is not null && ReferenceEquals(splitContent.Parent, _openedReplayTabs.SelectedTab))
         {
             _openedReplayTabs.SelectedTab.Controls.Remove(splitContent);
         }

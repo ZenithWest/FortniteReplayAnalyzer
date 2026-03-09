@@ -1,7 +1,8 @@
-using FortniteReplayReader.Models;
+ï»¿using FortniteReplayReader.Models;
 using FortniteReplayReader.Models.NetFieldExports;
 using FortniteReplayReader.Models.NetFieldExports.Weapons;
 using FortniteReplayReader.Models.NetFieldExports.RPC;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
@@ -65,6 +66,8 @@ public class FortniteReplayBuilder
         replay.MapData = MapData;
         replay.KillFeed = KillFeed;
         replay.DamageEvents = DamageEvents;
+        replay.Inventories = _inventories.Values;
+        replay.Weapons = _weapons.Values;
         replay.TeamData = _teams.Values;
         replay.PlayerData = _players.Values;
         return replay;
@@ -465,6 +468,9 @@ public class FortniteReplayBuilder
 
         newWeapon.bIsEquippingWeapon ??= weapon.bIsEquippingWeapon;
         newWeapon.bIsReloadingWeapon ??= weapon.bIsReloadingWeapon;
+        newWeapon.ChannelId ??= channelIndex;
+        newWeapon.OwnerActor ??= weapon.Owner?.Value;
+        newWeapon.InstigatorActor ??= weapon.Instigator;
         newWeapon.WeaponLevel ??= weapon.WeaponLevel;
         newWeapon.AmmoCount ??= weapon.AmmoCount;
         newWeapon.LastFireTimeVerified ??= weapon.LastFireTimeVerified;
@@ -559,7 +565,7 @@ public class FortniteReplayBuilder
 
     //public void UpdateExplosion(BroadcastExplosion explosion)
     //{
-    //    // ¯\_(?)_/¯
+    //    // Â¯\_(?)_/Â¯
     //}
 
     public void UpdatePoiManager(FortPoiManager poiManager)
@@ -622,6 +628,8 @@ public class FortniteReplayBuilder
             return;
         }
 
+        var weaponName = ResolveWeaponName(instigator);
+
         DamageEvents.Add(new DamageEvent
         {
             EventSource = "GameplayCue",
@@ -635,6 +643,8 @@ public class FortniteReplayBuilder
             ReplicatedWorldTimeSeconds = ReplicatedWorldTimeSeconds,
             ReplicatedWorldTimeSecondsDouble = ReplicatedWorldTimeSecondsDouble,
             Magnitude = magnitude,
+            WeaponName = weaponName,
+            WeaponType = NormalizeWeaponType(weaponName),
             Location = location,
             Normal = normal,
             TraceStart = effectContext?.HitResult?.TraceStart,
@@ -677,6 +687,8 @@ public class FortniteReplayBuilder
             TryGetPlayerDataFromActor(targetActor.Value, out target);
         }
 
+        var weaponName = ResolveWeaponName(instigator);
+
         DamageEvents.Add(new DamageEvent
         {
             EventSource = "DamageCue",
@@ -695,8 +707,51 @@ public class FortniteReplayBuilder
             IsShieldDestroyed = damageCues.bIsShieldDestroyed,
             IsShieldApplied = damageCues.bIsShieldApplied,
             IsBallistic = damageCues.bIsBallistic,
+            WeaponName = weaponName,
+            WeaponType = NormalizeWeaponType(weaponName),
             Location = damageCues.Location ?? damageCues.NonPlayerLocation,
             Normal = damageCues.Normal ?? damageCues.NonPlayerNormal
         });
     }
+
+    private string? ResolveWeaponName(PlayerData? player)
+    {
+        if (player?.CurrentWeapon is not uint weaponChannel)
+        {
+            return null;
+        }
+
+        if (_weapons.TryGetValue(weaponChannel, out var weapon))
+        {
+            return weapon.WeaponName;
+        }
+
+        if (_unknownWeapons.TryGetValue(weaponChannel, out var unknownWeapon))
+        {
+            return unknownWeapon.WeaponName;
+        }
+
+        return null;
+    }
+
+    private static string NormalizeWeaponType(string? weaponName)
+    {
+        if (string.IsNullOrWhiteSpace(weaponName))
+        {
+            return "Unknown";
+        }
+
+        var normalized = weaponName.Replace("_", " ", StringComparison.OrdinalIgnoreCase);
+
+        if (normalized.Contains("shotgun", StringComparison.OrdinalIgnoreCase)) return "Shotgun";
+        if (normalized.Contains("assault", StringComparison.OrdinalIgnoreCase) || normalized.Contains("rifle", StringComparison.OrdinalIgnoreCase)) return "Rifle";
+        if (normalized.Contains("smg", StringComparison.OrdinalIgnoreCase) || normalized.Contains("submachine", StringComparison.OrdinalIgnoreCase)) return "SMG";
+        if (normalized.Contains("pistol", StringComparison.OrdinalIgnoreCase) || normalized.Contains("revolver", StringComparison.OrdinalIgnoreCase)) return "Pistol";
+        if (normalized.Contains("sniper", StringComparison.OrdinalIgnoreCase) || normalized.Contains("dmr", StringComparison.OrdinalIgnoreCase)) return "Marksman";
+        if (normalized.Contains("rocket", StringComparison.OrdinalIgnoreCase) || normalized.Contains("grenade", StringComparison.OrdinalIgnoreCase) || normalized.Contains("launcher", StringComparison.OrdinalIgnoreCase)) return "Explosive";
+        if (normalized.Contains("pickaxe", StringComparison.OrdinalIgnoreCase) || normalized.Contains("harvesting", StringComparison.OrdinalIgnoreCase)) return "Melee";
+
+        return "Other";
+    }
 }
+
