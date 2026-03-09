@@ -52,8 +52,19 @@ internal static class CosmeticIconCache
             return null;
         }
 
-        using var stream = File.OpenRead(cachePath);
-        return Image.FromStream(stream);
+        try
+        {
+            using var stream = new FileStream(cachePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var memoryStream = new MemoryStream();
+            stream.CopyTo(memoryStream);
+            memoryStream.Position = 0;
+            using var image = Image.FromStream(memoryStream);
+            return new Bitmap(image);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
     }
 
     private static async Task<string?> DownloadIconAsync(string cosmeticId, string cachePath)
@@ -79,9 +90,15 @@ internal static class CosmeticIconCache
                 return null;
             }
 
+            var tempPath = $"{cachePath}.{Guid.NewGuid():N}.tmp";
+
             await using var iconStream = await HttpClient.GetStreamAsync(iconUrl).ConfigureAwait(false);
-            await using var fileStream = File.Create(cachePath);
-            await iconStream.CopyToAsync(fileStream).ConfigureAwait(false);
+            await using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                await iconStream.CopyToAsync(fileStream).ConfigureAwait(false);
+            }
+
+            File.Move(tempPath, cachePath, overwrite: true);
             return cachePath;
         }
         catch (Exception ex)
