@@ -23,7 +23,6 @@ public partial class FortniteReplayAnalyzer
     private CheckBox? _chkTimelineBots;
     private CheckBox? _chkTimelineTeam;
     private CheckBox? _chkTimelineCumulative;
-    private CheckedListBox? _lstTimelineCompare;
     private List<(string Name, List<DamageTimelinePoint> Points)> _timelineSeries = [];
 
     private void InitializeAdvancedAnalysisUi()
@@ -176,16 +175,6 @@ public partial class FortniteReplayAnalyzer
         filterPanel.Controls.Add(_chkTimelineBots);
         filterPanel.Controls.Add(_chkTimelineTeam);
         filterPanel.Controls.Add(_chkTimelineCumulative);
-        filterPanel.Controls.Add(new Label { AutoSize = true, Margin = new Padding(8, 6, 8, 0), Text = "Compare teammates" });
-
-        _lstTimelineCompare = new CheckedListBox
-        {
-            CheckOnClick = true,
-            Height = 64,
-            Width = 220
-        };
-        _lstTimelineCompare.ItemCheck += (_, _) => BeginInvoke(UpdateDamageTimelineChart);
-        filterPanel.Controls.Add(_lstTimelineCompare);
 
         _damageTimelinePanel = new Panel
         {
@@ -438,7 +427,6 @@ public partial class FortniteReplayAnalyzer
         }
 
         _timelineSeries.Clear();
-        _lstTimelineCompare?.Items.Clear();
 
         var replay = _selectedReplayRow?.Replay;
         var owner = replay is null ? null : GetReplayOwner(replay);
@@ -452,23 +440,10 @@ public partial class FortniteReplayAnalyzer
             .OrderBy(player => ResolvePlayerName(player, player.Id, player.PlayerId))
             .ToList() ?? [];
 
-        if (_lstTimelineCompare is not null)
-        {
-            foreach (var teammate in teamMates)
-            {
-                _lstTimelineCompare.Items.Add(new ComparisonPlayerItem(teammate, ResolvePlayerName(teammate, teammate.Id, teammate.PlayerId)));
-            }
-        }
-
         var selectedPlayers = new List<PlayerData> { owner };
         if (_chkTimelineTeam?.Checked == true)
         {
             selectedPlayers.AddRange(teamMates);
-        }
-
-        if (_lstTimelineCompare is not null)
-        {
-            selectedPlayers.AddRange(_lstTimelineCompare.CheckedItems.Cast<ComparisonPlayerItem>().Select(item => item.Player));
         }
 
         foreach (var player in selectedPlayers.DistinctBy(player => player.PlayerId))
@@ -510,11 +485,6 @@ public partial class FortniteReplayAnalyzer
                || (player.Id.HasValue && evt.InstigatorId == player.Id);
     }
 
-    private sealed record ComparisonPlayerItem(PlayerData Player, string Label)
-    {
-        public override string ToString() => Label;
-    }
-
     private void PaintDamageTimeline(Graphics graphics, Rectangle bounds)
     {
         graphics.Clear(Color.White);
@@ -522,8 +492,9 @@ public partial class FortniteReplayAnalyzer
         using var textBrush = new SolidBrush(Color.FromArgb(48, 56, 66));
         using var gridPen = new Pen(Color.Gainsboro, 1F);
         using var font = new Font("Segoe UI", 8.5F);
+        using var smallFont = new Font("Segoe UI", 8F);
 
-        var chartBounds = Rectangle.FromLTRB(bounds.Left + 48, bounds.Top + 16, bounds.Right - 12, bounds.Bottom - 34);
+        var chartBounds = Rectangle.FromLTRB(bounds.Left + 48, bounds.Top + 16, bounds.Right - 12, bounds.Bottom - 58);
         if (chartBounds.Width <= 10 || chartBounds.Height <= 10)
         {
             return;
@@ -554,6 +525,16 @@ public partial class FortniteReplayAnalyzer
             graphics.DrawString($"{maxDamage * i / 4F:0}", font, textBrush, 4, y - 8);
         }
 
+        for (var i = 0; i <= 4; i++)
+        {
+            var x = chartBounds.Left + (chartBounds.Width * i / 4F);
+            graphics.DrawLine(axisPen, x, chartBounds.Bottom, x, chartBounds.Bottom + 4);
+            var tickTime = maxTime * i / 4D;
+            var tickText = FormatMatchClock(tickTime);
+            var tickSize = graphics.MeasureString(tickText, smallFont);
+            graphics.DrawString(tickText, smallFont, textBrush, x - (tickSize.Width / 2F), chartBounds.Bottom + 6);
+        }
+
         for (var i = 0; i < _timelineSeries.Count; i++)
         {
             var color = palette[i % palette.Length];
@@ -573,9 +554,11 @@ public partial class FortniteReplayAnalyzer
                 graphics.DrawEllipse(linePen, points[0].X - 2, points[0].Y - 2, 4, 4);
             }
 
-            graphics.DrawString(_timelineSeries[i].Name, font, new SolidBrush(color), chartBounds.Left + 8 + (i * 120), bounds.Bottom - 22);
+            graphics.DrawString(_timelineSeries[i].Name, smallFont, new SolidBrush(color), chartBounds.Left + 8 + (i * 120), bounds.Bottom - 42);
         }
 
-        graphics.DrawString("Match Time", font, textBrush, chartBounds.Left + chartBounds.Width / 2F - 28, bounds.Bottom - 18);
+        var axisLabel = "Match Time";
+        var axisLabelSize = graphics.MeasureString(axisLabel, font);
+        graphics.DrawString(axisLabel, font, textBrush, chartBounds.Left + (chartBounds.Width - axisLabelSize.Width) / 2F, bounds.Bottom - 20);
     }
 }
