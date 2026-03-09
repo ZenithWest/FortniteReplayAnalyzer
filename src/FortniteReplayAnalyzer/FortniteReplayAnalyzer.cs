@@ -1625,19 +1625,56 @@ public partial class FortniteReplayAnalyzer : Form
         var target = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
         var playersEnabled = _chkKillFeedPlayers?.Checked ?? true;
         var botsEnabled = _chkKillFeedBots?.Checked ?? true;
+        var teamOnly = _chkTeamKillFeedOnly?.Checked ?? false;
+        var ownerTeam = GetReplayOwner(replay)?.TeamIndex;
+        var actorIsBot = actor?.IsBot ?? false;
+        var targetIsBot = target?.IsBot ?? false;
+        var hasBot = actorIsBot || targetIsBot;
+        var actorIsTeammate = ownerTeam.HasValue && actor?.TeamIndex == ownerTeam;
+        var targetIsTeammate = ownerTeam.HasValue && target?.TeamIndex == ownerTeam;
+        var hasTeammate = actorIsTeammate || targetIsTeammate;
 
-        return IsKillFeedParticipantEnabled(actor, playersEnabled, botsEnabled)
-            || IsKillFeedParticipantEnabled(target, playersEnabled, botsEnabled);
-    }
-
-    private static bool IsKillFeedParticipantEnabled(PlayerData? participant, bool playersEnabled, bool botsEnabled)
-    {
-        if (participant is null)
+        if (teamOnly && !hasTeammate)
         {
-            return playersEnabled || botsEnabled;
+            return false;
         }
 
-        return participant.IsBot ? botsEnabled : playersEnabled;
+        if (teamOnly)
+        {
+            if (playersEnabled && botsEnabled)
+            {
+                return true;
+            }
+
+            if (playersEnabled)
+            {
+                return !hasBot;
+            }
+
+            if (botsEnabled)
+            {
+                return hasBot;
+            }
+
+            return actorIsTeammate && targetIsTeammate;
+        }
+
+        if (playersEnabled && botsEnabled)
+        {
+            return true;
+        }
+
+        if (playersEnabled)
+        {
+            return !hasBot;
+        }
+
+        if (botsEnabled)
+        {
+            return hasBot;
+        }
+
+        return false;
     }
 
     private static bool IsDamageCategoryEnabled(DamageParticipantCategory category, CheckBox? players, CheckBox? bots, CheckBox? structures, CheckBox? npcs)
