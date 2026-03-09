@@ -59,6 +59,7 @@ public partial class FortniteReplayAnalyzer : Form
     private ToolStripMenuItem? _loadReplayMenuItem;
     private ToolStripMenuItem? _unloadReplayMenuItem;
     private ToolStripMenuItem? _stopReplayMenuItem;
+    private ReplayBrowserRow? _contextMenuReplayRow;
     private bool _suppressReplayTabSelection;
     private bool _isProcessingReplayQueue;
     private int _lastExpandedReplayPaneWidth = ExpandedReplayPaneWidth;
@@ -304,11 +305,13 @@ public partial class FortniteReplayAnalyzer : Form
                 return;
             }
 
+            _loadReplayMenuItem!.Tag = row;
+            _unloadReplayMenuItem!.Tag = row;
+            _stopReplayMenuItem!.Tag = row;
             _loadReplayMenuItem!.Enabled = !IsReplayLoaded(row) && !row.IsQueued && !row.IsLoading;
             _unloadReplayMenuItem!.Enabled = IsReplayLoaded(row);
             _stopReplayMenuItem!.Enabled = row.IsQueued || row.IsLoading;
         };
-
         dgvReplayBrowser.ContextMenuStrip = _replayBrowserContextMenu;
     }
 
@@ -1484,19 +1487,20 @@ public partial class FortniteReplayAnalyzer : Form
     {
         if (e.Button != MouseButtons.Right || e.RowIndex < 0 || e.RowIndex >= dgvReplayBrowser.Rows.Count)
         {
+            _contextMenuReplayRow = null;
             return;
         }
 
-        _suppressReplaySelectionChanged = true;
-        dgvReplayBrowser.ClearSelection();
-        dgvReplayBrowser.Rows[e.RowIndex].Selected = true;
-        dgvReplayBrowser.CurrentCell = dgvReplayBrowser.Rows[e.RowIndex].Cells[Math.Max(0, e.ColumnIndex)];
-        _selectedReplayRow = dgvReplayBrowser.Rows[e.RowIndex].DataBoundItem as ReplayBrowserRow;
-        _suppressReplaySelectionChanged = false;
+        _contextMenuReplayRow = dgvReplayBrowser.Rows[e.RowIndex].DataBoundItem as ReplayBrowserRow;
     }
 
     private ReplayBrowserRow? GetReplayRowForContextMenu()
     {
+        if (_contextMenuReplayRow is not null)
+        {
+            return _contextMenuReplayRow;
+        }
+
         if (dgvReplayBrowser.CurrentRow?.DataBoundItem is ReplayBrowserRow currentRow)
         {
             return currentRow;
@@ -1507,13 +1511,14 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void QueueSelectedReplayLoad()
     {
-        var row = GetReplayRowForContextMenu();
+        var row = _contextMenuReplayRow ?? _loadReplayMenuItem?.Tag as ReplayBrowserRow ?? GetReplayRowForContextMenu();
         if (row is null)
         {
             return;
         }
 
         QueueReplayLoad(row, ParseMode.Full);
+        ClearReplayBrowserContextTarget();
     }
 
     private void QueueReplayLoad(ReplayBrowserRow row, ParseMode parseMode)
@@ -1574,13 +1579,14 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void UnloadSelectedReplay()
     {
-        var row = GetReplayRowForContextMenu();
+        var row = _contextMenuReplayRow ?? _unloadReplayMenuItem?.Tag as ReplayBrowserRow ?? GetReplayRowForContextMenu();
         if (row is null)
         {
             return;
         }
 
         UnloadReplay(row);
+        ClearReplayBrowserContextTarget();
     }
 
     private void UnloadReplay(ReplayBrowserRow row)
@@ -1590,6 +1596,7 @@ public partial class FortniteReplayAnalyzer : Form
         row.Replay = null;
         row.LoadedParseMode = ParseMode.EventsOnly;
         row.Status = "Not loaded";
+        CloseReplayTab(row);
         BindReplayRows();
 
         if (row == _selectedReplayRow)
@@ -1601,13 +1608,22 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void StopSelectedReplayLoad()
     {
-        var row = GetReplayRowForContextMenu();
+        var row = _contextMenuReplayRow ?? _stopReplayMenuItem?.Tag as ReplayBrowserRow ?? GetReplayRowForContextMenu();
         if (row is null)
         {
             return;
         }
 
         StopReplayLoad(row);
+        ClearReplayBrowserContextTarget();
+    }
+
+    private void ClearReplayBrowserContextTarget()
+    {
+        _contextMenuReplayRow = null;
+        if (_loadReplayMenuItem is not null) _loadReplayMenuItem.Tag = null;
+        if (_unloadReplayMenuItem is not null) _unloadReplayMenuItem.Tag = null;
+        if (_stopReplayMenuItem is not null) _stopReplayMenuItem.Tag = null;
     }
 
     private void StopReplayLoad(ReplayBrowserRow row)
