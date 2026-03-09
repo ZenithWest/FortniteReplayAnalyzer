@@ -8,7 +8,7 @@ internal static class CosmeticIconCache
     private static readonly HttpClient HttpClient = new();
     private static readonly ConcurrentDictionary<string, Task<string?>> PendingDownloads = new(StringComparer.OrdinalIgnoreCase);
     private static readonly SemaphoreSlim DownloadThrottle = new(2, 2);
-    private static readonly string CacheFolder = Path.Combine(AppContext.BaseDirectory, "DebugOutput", "CosmeticCache");
+    private static readonly string CacheFolder = Path.Combine(AppContext.BaseDirectory, "Assets", "Cosmetics");
     private static readonly Image PlaceholderImage = BuildPlaceholderImage();
 
     public static string GetCachePath(string cosmeticId)
