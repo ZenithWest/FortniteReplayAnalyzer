@@ -1,3 +1,7 @@
+
+Forked originally from: https://github.com/Shiqan/FortniteReplayDecompressor
+His readme below:
+
 # FortniteReplayDecompressor
 
 ![FortniteReplayReader Nuget](https://img.shields.io/nuget/v/FortniteReplayReader?color=brightgreen)
