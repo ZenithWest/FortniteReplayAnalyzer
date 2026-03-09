@@ -21,6 +21,8 @@ public partial class FortniteReplayAnalyzer : Form
     private readonly HashSet<string> _manuallyAddedReplayPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<PlayerSummaryRow> _playerRows = [];
     private readonly Dictionary<string, int> _replayBrowserColumnWidths = new(StringComparer.Ordinal);
+    private readonly Queue<ReplayBrowserRow> _pendingReplayLoads = new();
+    private readonly HashSet<string> _pendingReplayLoadPaths = new(StringComparer.OrdinalIgnoreCase);
 
     private string _replaySortColumn = nameof(ReplayBrowserRow.RecordedAt);
     private bool _replaySortAscending;
@@ -53,7 +55,12 @@ public partial class FortniteReplayAnalyzer : Form
     private TabControl? _centerPanelTabs;
     private TabControl? _playerPanelTabs;
     private Label? _lblReplayHideHint;
+    private ContextMenuStrip? _replayBrowserContextMenu;
+    private ToolStripMenuItem? _loadReplayMenuItem;
+    private ToolStripMenuItem? _unloadReplayMenuItem;
+    private ToolStripMenuItem? _stopReplayMenuItem;
     private bool _suppressReplayTabSelection;
+    private bool _isProcessingReplayQueue;
     private int _lastExpandedReplayPaneWidth = ExpandedReplayPaneWidth;
 
     private string ReplayFolder => string.IsNullOrWhiteSpace(_settings.DefaultReplaysFolder) ? DefaultReplayFolder : _settings.DefaultReplaysFolder;
@@ -105,6 +112,7 @@ public partial class FortniteReplayAnalyzer : Form
         lblReplayHeader.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
         lblReplayStatus.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
         _lblReplayHideHint.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
+        InitializeReplayBrowserContextMenu();
 
         var killFeedFilterPanel = CreateFilterFlowPanel();
         _chkTeamKillFeedOnly = CreateFilterCheckBox("Team members only", (_, _) =>
@@ -273,6 +281,37 @@ public partial class FortniteReplayAnalyzer : Form
         UpdateReplayBrowserHeaderChrome();
     }
 
+    private void InitializeReplayBrowserContextMenu()
+    {
+        _replayBrowserContextMenu = new ContextMenuStrip();
+        _loadReplayMenuItem = new ToolStripMenuItem("Load", null, (_, _) => QueueSelectedReplayLoad());
+        _unloadReplayMenuItem = new ToolStripMenuItem("Unload", null, (_, _) => UnloadSelectedReplay());
+        _stopReplayMenuItem = new ToolStripMenuItem("Stop", null, (_, _) => StopSelectedReplayLoad());
+
+        _replayBrowserContextMenu.Items.AddRange(
+        [
+            _loadReplayMenuItem,
+            _unloadReplayMenuItem,
+            _stopReplayMenuItem
+        ]);
+
+        _replayBrowserContextMenu.Opening += (_, e) =>
+        {
+            var row = GetReplayRowForContextMenu();
+            if (row is null)
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            _loadReplayMenuItem!.Enabled = !IsReplayLoaded(row) && !row.IsQueued && !row.IsLoading;
+            _unloadReplayMenuItem!.Enabled = IsReplayLoaded(row);
+            _stopReplayMenuItem!.Enabled = row.IsQueued || row.IsLoading;
+        };
+
+        dgvReplayBrowser.ContextMenuStrip = _replayBrowserContextMenu;
+    }
+
     private void InitializeMenuStrip()
     {
         _menuStrip = new MenuStrip
@@ -349,7 +388,9 @@ public partial class FortniteReplayAnalyzer : Form
         Shown += async (_, _) => await RefreshReplayBrowserAsync();
 
         dgvReplayBrowser.SelectionChanged += async (_, _) => await HandleReplaySelectionChangedAsync();
+        dgvReplayBrowser.CellClick += async (_, e) => await HandleReplayBrowserCellClickAsync(e);
         dgvReplayBrowser.ColumnHeaderMouseClick += (_, e) => SortReplayRows(dgvReplayBrowser.Columns[e.ColumnIndex].Name);
+        dgvReplayBrowser.CellMouseDown += HandleReplayBrowserCellMouseDown;
 
 
         dgvKillFeed.CellContentClick += (_, e) => HandleKillFeedLinkClick(e);
@@ -487,7 +528,7 @@ public partial class FortniteReplayAnalyzer : Form
         dgvPlayerVictims.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
     }
 
-    private async Task RefreshReplayBrowserAsync()
+    private Task RefreshReplayBrowserAsync()
     {
         btnRefreshReplays.Enabled = false;
         lblReplayStatus.Text = Directory.Exists(ReplayFolder)
@@ -508,49 +549,17 @@ public partial class FortniteReplayAnalyzer : Form
                 ? "No replay files found."
                 : $"Replay folder not found: {ReplayFolder}";
             btnRefreshReplays.Enabled = true;
-            return;
+            return Task.CompletedTask;
         }
 
-        lblReplayStatus.Text = $"Found {_replayRows.Count} replay file(s). Loading selected replay...";
+        lblReplayStatus.Text = $"Found {_replayRows.Count} replay file(s). Click a replay to load it.";
         btnRefreshReplays.Enabled = true;
-
-        if (dgvReplayBrowser.Rows.Count > 0)
-        {
-            _suppressReplaySelectionChanged = true;
-            dgvReplayBrowser.ClearSelection();
-            dgvReplayBrowser.Rows[0].Selected = true;
-            dgvReplayBrowser.CurrentCell = dgvReplayBrowser.Rows[0].Cells[0];
-            _selectedReplayRow = dgvReplayBrowser.Rows[0].DataBoundItem as ReplayBrowserRow;
-            _suppressReplaySelectionChanged = false;
-        }
-
-        if (_selectedReplayRow is not null)
-        {
-            await EnsureReplayLoadedAsync(_selectedReplayRow, ParseMode.Full, updateSelectionView: true);
-            _ = LoadReplaySummariesAsync(_selectedReplayRow);
-            return;
-        }
-
-        lblReplayStatus.Text = "No replay files found.";
-    }
-
-    private async Task LoadReplaySummariesAsync(ReplayBrowserRow? skipRow = null)
-    {
-        try
-        {
-            foreach (var row in _replayRows.Where(r => !ReferenceEquals(r, skipRow) && !r.SummaryLoaded && !r.IsLoading).ToList())
-            {
-                await LoadReplayRowAsync(row, ParseMode.Minimal, updateSelectionView: false);
-            }
-
-            lblReplayStatus.Text = _replayRows.Count == 0
-                ? "No replay files found."
-                : $"Loaded {_replayRows.Count} replay file(s) from {ReplayFolder}";
-        }
-        catch (Exception ex)
-        {
-            DebugOutputWriter.LogError("Background replay summary loading failed.", ex);
-        }
+        _suppressReplaySelectionChanged = true;
+        dgvReplayBrowser.ClearSelection();
+        dgvReplayBrowser.CurrentCell = null;
+        _selectedReplayRow = null;
+        _suppressReplaySelectionChanged = false;
+        return Task.CompletedTask;
     }
 
     private async Task HandleReplaySelectionChangedAsync()
@@ -572,8 +581,30 @@ public partial class FortniteReplayAnalyzer : Form
         DisplayReplay(row);
     }
 
+    private async Task HandleReplayBrowserCellClickAsync(DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.RowIndex >= dgvReplayBrowser.Rows.Count)
+        {
+            return;
+        }
+
+        if (dgvReplayBrowser.Rows[e.RowIndex].DataBoundItem is not ReplayBrowserRow row)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(row, _selectedReplayRow) || row.IsLoading || row.IsQueued || IsReplayLoaded(row))
+        {
+            return;
+        }
+
+        await EnsureReplayLoadedAsync(row, ParseMode.Full, updateSelectionView: true);
+    }
+
     private async Task EnsureReplayLoadedAsync(ReplayBrowserRow row, ParseMode parseMode, bool updateSelectionView)
     {
+        CancelQueuedReplayLoad(row, preserveStatus: false);
+
         while (row.IsLoading)
         {
             await Task.Delay(50);
@@ -599,6 +630,9 @@ public partial class FortniteReplayAnalyzer : Form
             return;
         }
 
+        row.StopRequested = false;
+        row.IsQueued = false;
+        _pendingReplayLoadPaths.Remove(row.FilePath);
         row.IsLoading = true;
         row.Status = parseMode == ParseMode.Full ? "Loading full replay..." : "Loading summary...";
         BindReplayRows();
@@ -620,6 +654,12 @@ public partial class FortniteReplayAnalyzer : Form
             }
 
             var replay = loadResult.Replay!;
+            if (row.StopRequested)
+            {
+                MarkReplayAsStopped(row, updateSelectionView);
+                return;
+            }
+
             if (parseMode == ParseMode.Minimal && !HasReplaySummary(replay))
             {
                 loadResult = await Task.Run(() => ParseReplaySafely(row.FilePath, ParseMode.Normal));
@@ -637,6 +677,11 @@ public partial class FortniteReplayAnalyzer : Form
 
                 replay = loadResult.Replay!;
                 parseMode = ParseMode.Normal;
+                if (row.StopRequested)
+                {
+                    MarkReplayAsStopped(row, updateSelectionView);
+                    return;
+                }
             }
 
             ApplyReplaySummary(row, replay);
@@ -678,6 +723,8 @@ public partial class FortniteReplayAnalyzer : Form
     private void ApplyReplayFailure(ReplayBrowserRow row, string status, Exception ex, ParseMode parseMode, bool updateSelectionView)
     {
         row.Replay = null;
+        row.IsQueued = false;
+        row.StopRequested = false;
         row.Status = status;
         row.SummaryLoaded = true;
         row.Duration = TimeSpan.Zero;
@@ -1433,35 +1480,222 @@ public partial class FortniteReplayAnalyzer : Form
         await AddReplayFilesAsync(dialog.FileNames);
     }
 
-    private async Task AddReplayFilesAsync(IEnumerable<string> filePaths)
+    private void HandleReplayBrowserCellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
     {
-        ReplayBrowserRow? rowToSelect = null;
+        if (e.Button != MouseButtons.Right || e.RowIndex < 0 || e.RowIndex >= dgvReplayBrowser.Rows.Count)
+        {
+            return;
+        }
+
+        _suppressReplaySelectionChanged = true;
+        dgvReplayBrowser.ClearSelection();
+        dgvReplayBrowser.Rows[e.RowIndex].Selected = true;
+        dgvReplayBrowser.CurrentCell = dgvReplayBrowser.Rows[e.RowIndex].Cells[Math.Max(0, e.ColumnIndex)];
+        _selectedReplayRow = dgvReplayBrowser.Rows[e.RowIndex].DataBoundItem as ReplayBrowserRow;
+        _suppressReplaySelectionChanged = false;
+    }
+
+    private ReplayBrowserRow? GetReplayRowForContextMenu()
+    {
+        if (dgvReplayBrowser.CurrentRow?.DataBoundItem is ReplayBrowserRow currentRow)
+        {
+            return currentRow;
+        }
+
+        return _selectedReplayRow;
+    }
+
+    private void QueueSelectedReplayLoad()
+    {
+        var row = GetReplayRowForContextMenu();
+        if (row is null)
+        {
+            return;
+        }
+
+        QueueReplayLoad(row, ParseMode.Full);
+    }
+
+    private void QueueReplayLoad(ReplayBrowserRow row, ParseMode parseMode)
+    {
+        if (IsReplayLoaded(row) || row.IsLoading || row.IsQueued)
+        {
+            return;
+        }
+
+        row.StopRequested = false;
+        row.IsQueued = true;
+        row.QueuedParseMode = parseMode;
+        row.Status = "Queued";
+        if (_pendingReplayLoadPaths.Add(row.FilePath))
+        {
+            _pendingReplayLoads.Enqueue(row);
+        }
+
+        BindReplayRows();
+        lblReplayStatus.Text = $"{row.FileName} queued for loading.";
+        _ = ProcessReplayLoadQueueAsync();
+    }
+
+    private async Task ProcessReplayLoadQueueAsync()
+    {
+        if (_isProcessingReplayQueue)
+        {
+            return;
+        }
+
+        _isProcessingReplayQueue = true;
+        try
+        {
+            while (_pendingReplayLoads.Count > 0)
+            {
+                var row = _pendingReplayLoads.Dequeue();
+                _pendingReplayLoadPaths.Remove(row.FilePath);
+
+                if (!row.IsQueued || row.StopRequested || IsReplayLoaded(row))
+                {
+                    row.IsQueued = false;
+                    if (row.StopRequested)
+                    {
+                        MarkReplayAsStopped(row, updateSelectionView: false);
+                    }
+
+                    continue;
+                }
+
+                await LoadReplayRowAsync(row, row.QueuedParseMode, updateSelectionView: false);
+            }
+        }
+        finally
+        {
+            _isProcessingReplayQueue = false;
+        }
+    }
+
+    private void UnloadSelectedReplay()
+    {
+        var row = GetReplayRowForContextMenu();
+        if (row is null)
+        {
+            return;
+        }
+
+        UnloadReplay(row);
+    }
+
+    private void UnloadReplay(ReplayBrowserRow row)
+    {
+        CancelQueuedReplayLoad(row, preserveStatus: false);
+        row.StopRequested = false;
+        row.Replay = null;
+        row.LoadedParseMode = ParseMode.EventsOnly;
+        row.Status = "Not loaded";
+        BindReplayRows();
+
+        if (row == _selectedReplayRow)
+        {
+            ClearReplayDetails(keepReplaySelection: true);
+            lblReplayStatus.Text = $"{row.FileName} unloaded.";
+        }
+    }
+
+    private void StopSelectedReplayLoad()
+    {
+        var row = GetReplayRowForContextMenu();
+        if (row is null)
+        {
+            return;
+        }
+
+        StopReplayLoad(row);
+    }
+
+    private void StopReplayLoad(ReplayBrowserRow row)
+    {
+        if (row.IsQueued)
+        {
+            row.StopRequested = true;
+            CancelQueuedReplayLoad(row, preserveStatus: false);
+            MarkReplayAsStopped(row, updateSelectionView: row == _selectedReplayRow);
+            return;
+        }
+
+        if (!row.IsLoading)
+        {
+            return;
+        }
+
+        row.StopRequested = true;
+        row.Status = "Stopping...";
+        BindReplayRows();
+        if (row == _selectedReplayRow)
+        {
+            lblReplayStatus.Text = $"Stopping {row.FileName}...";
+        }
+    }
+
+    private void CancelQueuedReplayLoad(ReplayBrowserRow row, bool preserveStatus)
+    {
+        if (!row.IsQueued)
+        {
+            return;
+        }
+
+        row.IsQueued = false;
+        _pendingReplayLoadPaths.Remove(row.FilePath);
+        if (!preserveStatus)
+        {
+            row.Status = IsReplayLoaded(row) ? row.Status : "Not loaded";
+        }
+    }
+
+    private void MarkReplayAsStopped(ReplayBrowserRow row, bool updateSelectionView)
+    {
+        row.IsQueued = false;
+        row.IsLoading = false;
+        row.StopRequested = false;
+        row.Replay = null;
+        row.LoadedParseMode = ParseMode.EventsOnly;
+        row.Status = "Stopped";
+        BindReplayRows();
+
+        if (updateSelectionView)
+        {
+            ClearReplayDetails(keepReplaySelection: true);
+            lblReplayStatus.Text = $"{row.FileName} stopped.";
+        }
+    }
+
+    private static bool IsReplayLoaded(ReplayBrowserRow row) => row.Replay is not null && row.LoadedParseMode >= ParseMode.Full;
+
+    private Task AddReplayFilesAsync(IEnumerable<string> filePaths)
+    {
+        var addedCount = 0;
 
         foreach (var filePath in filePaths.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var existingRow = _replayRows.FirstOrDefault(row => string.Equals(row.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
             if (existingRow is not null)
             {
-                rowToSelect = existingRow;
                 continue;
             }
 
             _manuallyAddedReplayPaths.Add(filePath);
             var newRow = ReplayBrowserRow.CreateFromFile(filePath);
             _replayRows.Add(newRow);
-            rowToSelect = newRow;
+            addedCount++;
         }
 
-        if (rowToSelect is null)
+        if (addedCount == 0)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         BindReplayRows();
-        SelectReplayBrowserRow(rowToSelect);
-        _selectedReplayRow = rowToSelect;
-        lblReplayStatus.Text = $"Added {rowToSelect.FileName}";
-        await EnsureReplayLoadedAsync(rowToSelect, ParseMode.Full, updateSelectionView: true);
+        lblReplayStatus.Text = addedCount == 1
+            ? "Added 1 replay file. Click it to load."
+            : $"Added {addedCount} replay files. Click a replay to load it.";
+        return Task.CompletedTask;
     }
 
     private void CloseCurrentReplayFile()
@@ -1483,6 +1717,8 @@ public partial class FortniteReplayAnalyzer : Form
 
         _openedReplayTabs?.TabPages.Clear();
         _replayRows.Clear();
+        _pendingReplayLoads.Clear();
+        _pendingReplayLoadPaths.Clear();
         _manuallyAddedReplayPaths.Clear();
         ClearReplayDetails();
         BindReplayRows();
@@ -1493,6 +1729,7 @@ public partial class FortniteReplayAnalyzer : Form
     {
         var orderedRows = OrderReplayRows().ToList();
         var orderedIndex = orderedRows.FindIndex(candidate => string.Equals(candidate.FilePath, row.FilePath, StringComparison.OrdinalIgnoreCase));
+        StopReplayLoad(row);
         CloseReplayTab(row);
         _replayRows.RemoveAll(candidate => string.Equals(candidate.FilePath, row.FilePath, StringComparison.OrdinalIgnoreCase));
         _manuallyAddedReplayPaths.Remove(row.FilePath);
@@ -1518,7 +1755,8 @@ public partial class FortniteReplayAnalyzer : Form
         }
         else
         {
-            _ = EnsureReplayLoadedAsync(nextRow, ParseMode.Full, updateSelectionView: true);
+            ClearReplayDetails(keepReplaySelection: true);
+            lblReplayStatus.Text = $"{nextRow.FileName} selected. Click again to load if needed.";
         }
     }
 

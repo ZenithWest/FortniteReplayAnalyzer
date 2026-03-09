@@ -18,10 +18,13 @@ internal sealed class ReplayBrowserRow
     public int PlayerCount { get; set; }
     public string PlayerCountText { get; set; } = "-";
     public FortniteReplay? Replay { get; set; }
-    public string Status { get; set; } = "Queued";
+    public string Status { get; set; } = "Not loaded";
     public bool IsLoading { get; set; }
+    public bool IsQueued { get; set; }
+    public bool StopRequested { get; set; }
     public bool SummaryLoaded { get; set; }
     public ParseMode LoadedParseMode { get; set; } = ParseMode.EventsOnly;
+    public ParseMode QueuedParseMode { get; set; } = ParseMode.Full;
 
     public static ReplayBrowserRow CreateFromFile(string filePath)
     {
@@ -33,7 +36,7 @@ internal sealed class ReplayBrowserRow
             FileName = Path.GetFileName(filePath),
             RecordedAt = recordedAt,
             RecordedAtText = recordedAt.ToString("g"),
-            Status = "Queued"
+            Status = "Not loaded"
         };
     }
 }

@@ -11,7 +11,7 @@ internal sealed class AnalyzerSettings
         "Saved",
         "Demos");
 
-    public bool DebugOutputEnabled { get; set; } = true;
+    public bool DebugOutputEnabled { get; set; } = false;
     public string AccentColor { get; set; } = "#1976D2";
     public string SurfaceColor { get; set; } = "#F7F9FC";
     public string BackgroundColor { get; set; } = "#FFFFFF";
