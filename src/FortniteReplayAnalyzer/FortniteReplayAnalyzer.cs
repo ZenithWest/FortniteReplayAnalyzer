@@ -904,7 +904,7 @@ public partial class FortniteReplayAnalyzer : Form
         var cosmeticId = player?.Cosmetics?.Character;
         if (string.IsNullOrWhiteSpace(cosmeticId))
         {
-            return null;
+            return CosmeticIconCache.GetPlaceholderImage();
         }
 
         var cached = CosmeticIconCache.LoadCachedImage(cosmeticId);
@@ -913,25 +913,8 @@ public partial class FortniteReplayAnalyzer : Form
             return cached;
         }
 
-        _ = Task.Run(async () =>
-        {
-            var cachePath = await CosmeticIconCache.EnsureIconAsync(cosmeticId);
-            if (string.IsNullOrWhiteSpace(cachePath) || IsDisposed)
-            {
-                return;
-            }
-
-            BeginInvoke(() =>
-            {
-                if (_selectedReplayRow?.Replay is not null)
-                {
-                    BuildKillFeed(_selectedReplayRow.Replay);
-                    RefreshPlayerKillLog();
-                }
-            });
-        });
-
-        return null;
+        CosmeticIconCache.QueueBackgroundDownload(cosmeticId);
+        return CosmeticIconCache.GetPlaceholderImage();
     }
     private void BuildPlayerList(FortniteReplay replay)
     {
