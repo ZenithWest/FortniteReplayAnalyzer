@@ -1,0 +1,12 @@
+[
+  {
+    "Name": "FortniteReplayAnalyzer",
+    "Projects": [
+      {
+        "Path": "FortniteReplayAnalyzer\\FortniteReplayAnalyzer.csproj",
+        "Action": "Start",
+        "DebugTarget": "FortniteReplayAnalyzer"
+      }
+    ]
+  }
+]
