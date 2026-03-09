@@ -57,12 +57,21 @@ internal static class CosmeticIconCache
             using var stream = new FileStream(cachePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var memoryStream = new MemoryStream();
             stream.CopyTo(memoryStream);
+            if (memoryStream.Length == 0)
+            {
+                return null;
+            }
             memoryStream.Position = 0;
             using var image = Image.FromStream(memoryStream);
             return new Bitmap(image);
         }
         catch (IOException)
         {
+            return null;
+        }
+        catch (ArgumentException)
+        {
+            TryDeleteCorruptCacheFile(cachePath);
             return null;
         }
     }
@@ -112,5 +121,20 @@ internal static class CosmeticIconCache
     {
         var invalid = Path.GetInvalidFileNameChars();
         return string.Concat(input.Select(ch => invalid.Contains(ch) ? '_' : ch));
+    }
+
+    private static void TryDeleteCorruptCacheFile(string cachePath)
+    {
+        try
+        {
+            if (File.Exists(cachePath))
+            {
+                File.Delete(cachePath);
+            }
+        }
+        catch
+        {
+            // Ignore cleanup failures; the caller already falls back to no image.
+        }
     }
 }
