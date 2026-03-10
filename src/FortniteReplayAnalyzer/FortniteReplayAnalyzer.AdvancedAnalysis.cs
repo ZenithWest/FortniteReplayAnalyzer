@@ -23,11 +23,14 @@ public partial class FortniteReplayAnalyzer
     private Button? _btnOverallStatsStop;
     private CancellationTokenSource? _overallStatsLoadCts;
     private Panel? _damageTimelinePanel;
+    private Panel? _overallTrendsPanel;
     private CheckBox? _chkTimelinePlayers;
     private CheckBox? _chkTimelineBots;
     private CheckBox? _chkTimelineTeam;
     private CheckBox? _chkTimelineCumulative;
+    private CheckBox? _chkOverallKillsIncludeBots;
     private List<(string Name, List<DamageTimelinePoint> Points)> _timelineSeries = [];
+    private List<MatchTrendRow> _overallTrendRows = [];
 
     private void InitializeAdvancedAnalysisUi()
     {
@@ -56,11 +59,12 @@ public partial class FortniteReplayAnalyzer
             ColumnCount = 1,
             Dock = DockStyle.Fill,
             Padding = new Padding(12),
-            RowCount = 3
+            RowCount = 4
         };
         page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        page.RowStyles.Add(new RowStyle(SizeType.Absolute, 260F));
         page.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
         var filters = CreateFilterFlowPanel();
@@ -155,6 +159,8 @@ public partial class FortniteReplayAnalyzer
         filters.Controls.Add(_dtOverallTo);
         filters.Controls.Add(btnRefresh);
         filters.Controls.Add(_btnOverallStatsStop);
+        _chkOverallKillsIncludeBots = CreateFilterCheckBox("Include bot kills", async (_, _) => await RefreshOverallStatsPageAsync(), true);
+        filters.Controls.Add(_chkOverallKillsIncludeBots);
 
         _lblOverallStatsStatus = new Label
         {
@@ -167,9 +173,18 @@ public partial class FortniteReplayAnalyzer
         _dgvOverallStats.AutoGenerateColumns = false;
         BuildGameStatsColumns(_dgvOverallStats);
 
+        _overallTrendsPanel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            Height = 240,
+            BackColor = Color.White
+        };
+        _overallTrendsPanel.Paint += (_, e) => PaintOverallTrends(e.Graphics, _overallTrendsPanel.ClientRectangle);
+
         page.Controls.Add(filters, 0, 0);
         page.Controls.Add(_lblOverallStatsStatus, 0, 1);
-        page.Controls.Add(_dgvOverallStats, 0, 2);
+        page.Controls.Add(_overallTrendsPanel, 0, 2);
+        page.Controls.Add(_dgvOverallStats, 0, 3);
         return page;
     }
 
@@ -298,6 +313,8 @@ public partial class FortniteReplayAnalyzer
             }, cancellationToken);
 
             _dgvOverallStats.DataSource = detailRows;
+            _overallTrendRows = BuildOverallTrendRows(rows).ToList();
+            _overallTrendsPanel?.Invalidate();
             _lblOverallStatsStatus.Text = rows.Count == 0
                 ? "No loaded replays in range."
                 : $"Overall statistics built from {rows.Count} loaded replay(s).";
@@ -305,6 +322,8 @@ public partial class FortniteReplayAnalyzer
         catch (OperationCanceledException)
         {
             _lblOverallStatsStatus.Text = "Overall statistics refresh stopped.";
+            _overallTrendRows = [];
+            _overallTrendsPanel?.Invalidate();
         }
         finally
         {
@@ -362,6 +381,7 @@ public partial class FortniteReplayAnalyzer
 
         foreach (var group in replay.DamageEvents
                      .Where(evt => IsDamageByPlayer(owner, evt))
+                     .Where(evt => IsCombatDamageParticipant(ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot)))
                      .GroupBy(evt => new
                      {
                          WeaponType = GetWeaponStatsTypeLabel(evt),
@@ -444,29 +464,23 @@ public partial class FortniteReplayAnalyzer
         var damages = owners.Select(x => (double)(x.Replay.Stats?.DamageToPlayers ?? 0)).ToList();
         var damageTaken = owners.Select(x => (double)(x.Replay.Stats?.DamageTaken ?? 0)).ToList();
         var accuracies = owners.Select(x => (double)(x.Replay.Stats?.Accuracy ?? 0)).ToList();
-        var damageEvents = owners
+        var combatDamageEvents = owners
             .SelectMany(x => x.Replay.DamageEvents
                 .Where(evt => IsDamageByPlayer(x.Owner!, evt))
+                .Where(evt => IsCombatDamageParticipant(ClassifyDamageParticipant(x.Replay, evt.TargetId, evt.TargetName, evt.TargetIsBot)))
                 .Select(evt => new
                 {
                     Replay = x.Replay,
                     Event = evt
                 }))
             .ToList();
-        var critCount = damageEvents.Count(x => x.Event.IsCritical == true);
-        var playerDamageTotal = damageEvents
+        var critCount = combatDamageEvents.Count(x => x.Event.IsCritical == true);
+        var playerDamageTotal = combatDamageEvents
             .Where(x => ClassifyDamageParticipant(x.Replay, x.Event.TargetId, x.Event.TargetName, x.Event.TargetIsBot) == DamageParticipantCategory.Player)
             .Sum(x => x.Event.Magnitude ?? 0F);
-        var botDamageTotal = damageEvents
+        var botDamageTotal = combatDamageEvents
             .Where(x => ClassifyDamageParticipant(x.Replay, x.Event.TargetId, x.Event.TargetName, x.Event.TargetIsBot) == DamageParticipantCategory.Bot)
             .Sum(x => x.Event.Magnitude ?? 0F);
-        var structureDamageTotal = damageEvents
-            .Where(x => ClassifyDamageParticipant(x.Replay, x.Event.TargetId, x.Event.TargetName, x.Event.TargetIsBot) == DamageParticipantCategory.Structure)
-            .Sum(x => x.Event.Magnitude ?? 0F);
-        var npcDamageTotal = damageEvents
-            .Where(x => ClassifyDamageParticipant(x.Replay, x.Event.TargetId, x.Event.TargetName, x.Event.TargetIsBot) == DamageParticipantCategory.Npc)
-            .Sum(x => x.Event.Magnitude ?? 0F);
-
         yield return new DetailRow("Matches", owners.Count.ToString(CultureInfo.CurrentCulture));
         yield return new DetailRow("Wins", placements.Count(place => place == 1).ToString(CultureInfo.CurrentCulture));
         yield return new DetailRow("Win Rate", $"{owners.Count(place => place.Owner!.Placement == 1) / (double)owners.Count * 100:0.0}%");
@@ -480,21 +494,19 @@ public partial class FortniteReplayAnalyzer
         yield return new DetailRow("Avg Damage To Players", $"{damages.Average():0.0}");
         yield return new DetailRow("Avg Damage Taken", $"{damageTaken.Average():0.0}");
         yield return new DetailRow("Avg Accuracy", $"{accuracies.Average():0.0}%");
-        yield return new DetailRow("Critical Hit Rate", damageEvents.Count == 0 ? "-" : $"{critCount / (double)damageEvents.Count * 100:0.0}%");
-        yield return new DetailRow("Damage Events Logged", damageEvents.Count.ToString(CultureInfo.CurrentCulture));
-        yield return new DetailRow("Avg Hit Damage", damageEvents.Count == 0 ? "-" : $"{damageEvents.Average(x => x.Event.Magnitude ?? 0F):0.0}");
+        yield return new DetailRow("Critical Hit Rate", combatDamageEvents.Count == 0 ? "-" : $"{critCount / (double)combatDamageEvents.Count * 100:0.0}%");
+        yield return new DetailRow("Damage Events Logged", combatDamageEvents.Count.ToString(CultureInfo.CurrentCulture));
+        yield return new DetailRow("Avg Hit Damage", combatDamageEvents.Count == 0 ? "-" : $"{combatDamageEvents.Average(x => x.Event.Magnitude ?? 0F):0.0}");
         yield return new DetailRow("Damage To Bots", $"{botDamageTotal:0.0}");
         yield return new DetailRow("Damage To Players", $"{playerDamageTotal:0.0}");
-        yield return new DetailRow("Damage To Structures", $"{structureDamageTotal:0.0}");
-        yield return new DetailRow("Damage To NPCs", $"{npcDamageTotal:0.0}");
         yield return new DetailRow("Revives", owners.Sum(x => x.Replay.Stats?.Revives ?? 0).ToString(CultureInfo.CurrentCulture));
         yield return new DetailRow("Assists", owners.Sum(x => x.Replay.Stats?.Assists ?? 0).ToString(CultureInfo.CurrentCulture));
         yield return new DetailRow("Materials Gathered", owners.Sum(x => x.Replay.Stats?.MaterialsGathered ?? 0).ToString(CultureInfo.CurrentCulture));
         yield return new DetailRow("Materials Used", owners.Sum(x => x.Replay.Stats?.MaterialsUsed ?? 0).ToString(CultureInfo.CurrentCulture));
-        yield return new DetailRow("Distance Travelled", owners.Sum(x => x.Replay.Stats?.TotalTraveled ?? 0).ToString(CultureInfo.CurrentCulture));
-        yield return new DetailRow("Early Fight Damage (0-5m)", $"{damageEvents.Where(x => GetDamageTime(x.Event) <= 300).Sum(x => x.Event.Magnitude ?? 0F):0.0}");
-        yield return new DetailRow("Mid Fight Damage (5-12m)", $"{damageEvents.Where(x => GetDamageTime(x.Event) > 300 && GetDamageTime(x.Event) <= 720).Sum(x => x.Event.Magnitude ?? 0F):0.0}");
-        yield return new DetailRow("Late Fight Damage (12m+)", $"{damageEvents.Where(x => GetDamageTime(x.Event) > 720).Sum(x => x.Event.Magnitude ?? 0F):0.0}");
+        yield return new DetailRow("Distance Travelled", $"{owners.Sum(x => x.Replay.Stats?.TotalTraveled ?? 0) / 100.0:0.0} m");
+        yield return new DetailRow("Early Fight Damage (0-5m)", $"{combatDamageEvents.Where(x => GetDamageTime(x.Event) <= 300).Sum(x => x.Event.Magnitude ?? 0F):0.0}");
+        yield return new DetailRow("Mid Fight Damage (5-12m)", $"{combatDamageEvents.Where(x => GetDamageTime(x.Event) > 300 && GetDamageTime(x.Event) <= 720).Sum(x => x.Event.Magnitude ?? 0F):0.0}");
+        yield return new DetailRow("Late Fight Damage (12m+)", $"{combatDamageEvents.Where(x => GetDamageTime(x.Event) > 720).Sum(x => x.Event.Magnitude ?? 0F):0.0}");
         yield return new DetailRow(
             "Longest Elimination Distance",
             $"{owners.SelectMany(ownerRow => ownerRow.Replay.KillFeed
@@ -563,6 +575,35 @@ public partial class FortniteReplayAnalyzer
         _damageTimelinePanel.Invalidate();
     }
 
+    private IEnumerable<MatchTrendRow> BuildOverallTrendRows(IEnumerable<ReplayBrowserRow> rows)
+    {
+        foreach (var row in rows.Where(x => x.Replay is not null))
+        {
+            var replay = row.Replay!;
+            var owner = GetReplayOwner(replay);
+            if (owner is null)
+            {
+                continue;
+            }
+
+            var combatDamage = replay.DamageEvents
+                .Where(evt => IsDamageByPlayer(owner, evt))
+                .Where(evt => IsCombatDamageParticipant(ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot)))
+                .Sum(evt => evt.Magnitude ?? 0F);
+
+            var kills = replay.KillFeed
+                .Where(entry => MatchesResolvedKillFeedActor(replay, owner, entry) && !entry.IsRevived && !entry.IsDowned)
+                .Count(entry => (_chkOverallKillsIncludeBots?.Checked ?? true) || !(FindPlayer(replay, entry.PlayerId, entry.PlayerName)?.IsBot ?? entry.PlayerIsBot));
+
+            yield return new MatchTrendRow
+            {
+                Label = string.IsNullOrWhiteSpace(row.RecordedAtText) ? row.FileName : row.RecordedAtText,
+                DamageToPlayersAndBots = combatDamage,
+                Kills = kills
+            };
+        }
+    }
+
     private bool ShouldIncludeTimelineDamageEvent(FortniteReplay replay, DamageEvent evt)
     {
         var category = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
@@ -573,6 +614,11 @@ public partial class FortniteReplayAnalyzer
             DamageParticipantCategory.Bot => _chkTimelineBots?.Checked ?? true,
             _ => false
         };
+    }
+
+    private static bool IsCombatDamageParticipant(DamageParticipantCategory category)
+    {
+        return category is DamageParticipantCategory.Player or DamageParticipantCategory.Bot;
     }
 
     private static bool IsDamageByPlayer(PlayerData player, DamageEvent evt)
@@ -603,6 +649,7 @@ public partial class FortniteReplayAnalyzer
             return;
         }
 
+        var isCumulative = _chkTimelineCumulative?.Checked == true;
         var maxTime = Math.Max(1D, _timelineSeries.SelectMany(series => series.Points).DefaultIfEmpty(new DamageTimelinePoint()).Max(point => point.TimeValue));
         var maxDamage = Math.Max(1F, _timelineSeries.SelectMany(series => series.Points).DefaultIfEmpty(new DamageTimelinePoint()).Max(point => point.Damage));
         var palette = new[]
@@ -635,26 +682,99 @@ public partial class FortniteReplayAnalyzer
         {
             var color = palette[i % palette.Length];
             using var linePen = new Pen(color, 2.5F);
-            var points = _timelineSeries[i].Points
-                .Select(point => new PointF(
-                    chartBounds.Left + (float)(point.TimeValue / maxTime) * chartBounds.Width,
-                    chartBounds.Bottom - (point.Damage / maxDamage) * chartBounds.Height))
-                .ToArray();
-
-            if (points.Length >= 2)
+            var series = _timelineSeries[i];
+            if (isCumulative)
             {
-                graphics.DrawLines(linePen, points);
+                var points = series.Points
+                    .Select(point => new PointF(
+                        chartBounds.Left + (float)(point.TimeValue / maxTime) * chartBounds.Width,
+                        chartBounds.Bottom - (point.Damage / maxDamage) * chartBounds.Height))
+                    .ToArray();
+
+                if (points.Length >= 2)
+                {
+                    graphics.DrawLines(linePen, points);
+                }
+                else if (points.Length == 1)
+                {
+                    graphics.DrawEllipse(linePen, points[0].X - 2, points[0].Y - 2, 4, 4);
+                }
             }
-            else if (points.Length == 1)
+            else
             {
-                graphics.DrawEllipse(linePen, points[0].X - 2, points[0].Y - 2, 4, 4);
+                using var brush = new SolidBrush(Color.FromArgb(140, color));
+                var slotWidth = Math.Max(3F, chartBounds.Width / Math.Max(1F, (float)series.Points.Count * _timelineSeries.Count));
+                for (var j = 0; j < series.Points.Count; j++)
+                {
+                    var point = series.Points[j];
+                    var x = chartBounds.Left + (float)(point.TimeValue / maxTime) * chartBounds.Width;
+                    var offset = (i - (_timelineSeries.Count - 1) / 2F) * slotWidth;
+                    var height = (point.Damage / maxDamage) * chartBounds.Height;
+                    graphics.FillRectangle(brush, x + offset, chartBounds.Bottom - height, Math.Max(2F, slotWidth - 1F), height);
+                }
             }
 
-            graphics.DrawString(_timelineSeries[i].Name, smallFont, new SolidBrush(color), chartBounds.Left + 8 + (i * 120), bounds.Bottom - 42);
+            using var legendBrush = new SolidBrush(color);
+            graphics.DrawString(series.Name, smallFont, legendBrush, chartBounds.Left + 8 + (i * 120), bounds.Bottom - 42);
         }
 
         var axisLabel = "Match Time";
         var axisLabelSize = graphics.MeasureString(axisLabel, font);
         graphics.DrawString(axisLabel, font, textBrush, chartBounds.Left + (chartBounds.Width - axisLabelSize.Width) / 2F, bounds.Bottom - 20);
+    }
+
+    private void PaintOverallTrends(Graphics graphics, Rectangle bounds)
+    {
+        graphics.Clear(Color.White);
+        using var axisPen = new Pen(Color.Silver, 1F);
+        using var textBrush = new SolidBrush(Color.FromArgb(48, 56, 66));
+        using var gridPen = new Pen(Color.Gainsboro, 1F);
+        using var font = new Font("Segoe UI", 8.5F);
+        using var titleFont = new Font("Segoe UI Semibold", 9F, FontStyle.Bold);
+        using var damageBrush = new SolidBrush(Color.FromArgb(52, 123, 220));
+        using var killsBrush = new SolidBrush(Color.FromArgb(244, 124, 32));
+
+        var leftChart = Rectangle.FromLTRB(bounds.Left + 16, bounds.Top + 28, bounds.Left + (bounds.Width / 2) - 12, bounds.Bottom - 28);
+        var rightChart = Rectangle.FromLTRB(bounds.Left + (bounds.Width / 2) + 12, bounds.Top + 28, bounds.Right - 16, bounds.Bottom - 28);
+
+        graphics.DrawString("Damage Per Match", titleFont, textBrush, leftChart.Left, bounds.Top + 4);
+        graphics.DrawString("Kills Per Match", titleFont, textBrush, rightChart.Left, bounds.Top + 4);
+
+        PaintBarChart(graphics, leftChart, _overallTrendRows.Select(row => ((double)row.DamageToPlayersAndBots, row.Label)).ToList(), damageBrush, axisPen, gridPen, textBrush, font);
+        PaintBarChart(graphics, rightChart, _overallTrendRows.Select(row => ((double)row.Kills, row.Label)).ToList(), killsBrush, axisPen, gridPen, textBrush, font);
+    }
+
+    private static void PaintBarChart(Graphics graphics, Rectangle bounds, List<(double Value, string Label)> values, Brush barBrush, Pen axisPen, Pen gridPen, Brush textBrush, Font font)
+    {
+        graphics.DrawRectangle(axisPen, bounds);
+        if (values.Count == 0)
+        {
+            graphics.DrawString("No loaded replays in range.", font, textBrush, bounds.Left + 8, bounds.Top + 8);
+            return;
+        }
+
+        var maxValue = Math.Max(1D, values.Max(x => x.Value));
+        for (var i = 1; i <= 4; i++)
+        {
+            var y = bounds.Bottom - (bounds.Height * i / 4F);
+            graphics.DrawLine(gridPen, bounds.Left, y, bounds.Right, y);
+        }
+
+        var barWidth = Math.Max(10F, (bounds.Width - 16F) / Math.Max(1, values.Count) - 8F);
+        for (var i = 0; i < values.Count; i++)
+        {
+            var value = values[i];
+            var x = bounds.Left + 8F + i * (barWidth + 8F);
+            var height = (float)(value.Value / maxValue) * (bounds.Height - 28F);
+            graphics.FillRectangle(barBrush, x, bounds.Bottom - height, barWidth, height);
+
+            var label = value.Label;
+            if (label.Length > 8)
+            {
+                label = label[..8];
+            }
+
+            graphics.DrawString(label, font, textBrush, x, bounds.Bottom + 2);
+        }
     }
 }

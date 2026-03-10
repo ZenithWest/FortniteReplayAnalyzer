@@ -64,6 +64,7 @@ public partial class FortniteReplayAnalyzer : Form
     private bool _isProcessingReplayQueue;
     private int _lastExpandedReplayPaneWidth = ExpandedReplayPaneWidth;
     private readonly HashSet<DataGridView> _iconTextConfiguredGrids = [];
+    private PictureBox? _picSelectedPlayer;
 
     private string ReplayFolder => string.IsNullOrWhiteSpace(_settings.DefaultReplaysFolder) ? DefaultReplayFolder : _settings.DefaultReplaysFolder;
 
@@ -117,6 +118,18 @@ public partial class FortniteReplayAnalyzer : Form
         lblReplayStatus.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
         _lblReplayHideHint.Click += (_, _) => SetReplayPaneCollapsed(!_isReplayPaneCollapsed);
         InitializeReplayBrowserContextMenu();
+
+        _picSelectedPlayer = new PictureBox
+        {
+            Size = new Size(40, 40),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Location = new Point(8, 8),
+            BorderStyle = BorderStyle.FixedSingle
+        };
+        playerHeaderPanel.Controls.Add(_picSelectedPlayer);
+        playerHeaderPanel.Controls.SetChildIndex(_picSelectedPlayer, 0);
+        lblPlayerPanelTitle.Location = new Point(56, 8);
+        lblSelectedPlayer.Location = new Point(56, 40);
 
         var killFeedFilterPanel = CreateFilterFlowPanel();
         _chkTeamKillFeedOnly = CreateFilterCheckBox("Team members only", (_, _) =>
@@ -505,6 +518,7 @@ public partial class FortniteReplayAnalyzer : Form
         grid.Columns.Add(CreateIconNameColumn(nameof(KillFeedRow.ActorName), "Actor", nameof(KillFeedRow.ActorName), 150));
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(KillFeedRow.EventText), HeaderText = "Event", DataPropertyName = nameof(KillFeedRow.EventText), FillWeight = 85 });
         grid.Columns.Add(CreateIconNameColumn(nameof(KillFeedRow.TargetName), "Target", nameof(KillFeedRow.TargetName), 150));
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(KillFeedRow.ReasonText), HeaderText = "Reason", DataPropertyName = nameof(KillFeedRow.ReasonText), FillWeight = 95 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(KillFeedRow.DistanceText), HeaderText = "Distance", DataPropertyName = nameof(KillFeedRow.DistanceText), FillWeight = 70 });
         grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
     }
@@ -538,6 +552,7 @@ public partial class FortniteReplayAnalyzer : Form
         dgvPlayerVictims.Columns.Add(CreateIconNameColumn(nameof(PlayerVictimRow.PlayerName), "Player", nameof(PlayerVictimRow.PlayerName), 150));
         dgvPlayerVictims.Columns.Add(new DataGridViewCheckBoxColumn { Name = nameof(PlayerVictimRow.IsBot), HeaderText = "Bot", DataPropertyName = nameof(PlayerVictimRow.IsBot), FillWeight = 45 });
         dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.EventText), HeaderText = "Event", DataPropertyName = nameof(PlayerVictimRow.EventText), FillWeight = 80 });
+        dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.ReasonText), HeaderText = "Reason", DataPropertyName = nameof(PlayerVictimRow.ReasonText), FillWeight = 95 });
         dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.TimeText), HeaderText = "Time", DataPropertyName = nameof(PlayerVictimRow.TimeText), FillWeight = 70 });
         dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.DistanceText), HeaderText = "Distance", DataPropertyName = nameof(PlayerVictimRow.DistanceText), FillWeight = 80 });
         dgvPlayerVictims.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
@@ -879,6 +894,7 @@ public partial class FortniteReplayAnalyzer : Form
             TargetId = targetPlayer?.Id ?? entry.PlayerId,
             TargetLookupKey = targetPlayer?.PlayerId ?? entry.PlayerName,
             EventText = GetKillFeedEventText(entry),
+            ReasonText = FormatKillFeedReason(entry),
             DistanceText = FormatDistance(entry.Distance)
         };
     }
@@ -1036,6 +1052,7 @@ public partial class FortniteReplayAnalyzer : Form
             dgvPlayerOverview.DataSource = new List<DetailRow>();
             dgvPlayerCombatLog.DataSource = new List<KillFeedRow>();
             dgvPlayerVictims.DataSource = new List<PlayerVictimRow>();
+            if (_picSelectedPlayer is not null) _picSelectedPlayer.Image = CosmeticIconCache.GetPlaceholderImage();
             if (_dgvPlayerDamageLog is not null)
             {
                 _dgvPlayerDamageLog.DataSource = new List<CombatEventRow>();
@@ -1045,6 +1062,10 @@ public partial class FortniteReplayAnalyzer : Form
 
         lblSelectedPlayer.Text = ResolvePlayerName(player, player.Id, player.PlayerId);
         lblPlayerPanelTitle.Text = $"Player Stats - {ResolvePlayerName(player, player.Id, player.PlayerId)}";
+        if (_picSelectedPlayer is not null)
+        {
+            _picSelectedPlayer.Image = GetPlayerSkinIcon(player) ?? CosmeticIconCache.GetPlaceholderImage();
+        }
         dgvPlayerOverview.DataSource = BuildPlayerOverview(_selectedReplayRow.Replay, player).ToList();
         RefreshPlayerKillLog();
         dgvPlayerVictims.DataSource = BuildPlayerVictimRows(_selectedReplayRow.Replay, player).ToList();
@@ -1088,6 +1109,7 @@ public partial class FortniteReplayAnalyzer : Form
         yield return new DetailRow("Eliminated By", !eliminatedBy.HasValue ? "-" : ResolvePlayerName(eliminatedBy.Value.Player, eliminatedBy.Value.NumericId, eliminatedBy.Value.LookupKey));
         yield return new DetailRow("Damage Events Given", hitsGiven.ToString(CultureInfo.CurrentCulture));
         yield return new DetailRow("Damage Events Taken", hitsTaken.ToString(CultureInfo.CurrentCulture));
+        yield return new DetailRow("Total Damage", FormatDamageTotal(damageDealt.Players + damageDealt.Bots + damageDealt.Npcs + damageDealt.Structures));
         yield return new DetailRow("Damage To Players", FormatDamageTotal(damageDealt.Players));
         yield return new DetailRow("Damage To Bots", FormatDamageTotal(damageDealt.Bots));
         yield return new DetailRow("Damage To NPCs", FormatDamageTotal(damageDealt.Npcs));
@@ -1134,6 +1156,7 @@ public partial class FortniteReplayAnalyzer : Form
                     PlayerLookupKey = victim?.PlayerId ?? entry.PlayerName,
                     IsBot = victim?.IsBot ?? false,
                     EventText = GetKillFeedEventText(entry),
+                    ReasonText = FormatKillFeedReason(entry),
                     TimeText = FormatMatchClock(GetKillFeedTime(entry)),
                     DistanceText = FormatDistance(entry.Distance)
                 };
@@ -1164,6 +1187,7 @@ public partial class FortniteReplayAnalyzer : Form
         dgvPlayerOverview.DataSource = new List<DetailRow>();
         dgvPlayerCombatLog.DataSource = new List<KillFeedRow>();
         dgvPlayerVictims.DataSource = new List<PlayerVictimRow>();
+        if (_picSelectedPlayer is not null) _picSelectedPlayer.Image = CosmeticIconCache.GetPlaceholderImage();
         if (_dgvPlayerDamageLog is not null)
         {
             _dgvPlayerDamageLog.DataSource = new List<CombatEventRow>();
@@ -1515,7 +1539,7 @@ public partial class FortniteReplayAnalyzer : Form
             return evt.WeaponAssetName!;
         }
 
-        return "-";
+        return "Unknown";
     }
 
 
@@ -2339,6 +2363,41 @@ public partial class FortniteReplayAnalyzer : Form
     }
 
     private static string GetKillFeedEventText(KillFeedEntry entry) => entry.IsRevived ? "Revived" : entry.IsDowned ? "Downed" : "Eliminated";
+
+    private static string FormatKillFeedReason(KillFeedEntry entry)
+    {
+        var tags = entry.DeathTags?
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Select(ShortGameplayTag)
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (tags is { Count: > 0 })
+        {
+            return string.Join(", ", tags.Take(2));
+        }
+
+        if (entry.DeathCause.HasValue)
+        {
+            return $"Cause {entry.DeathCause.Value}";
+        }
+
+        return "-";
+    }
+
+    private static string ShortGameplayTag(string value)
+    {
+        var tag = value.Trim();
+        var dotIndex = tag.LastIndexOf('.');
+        if (dotIndex >= 0 && dotIndex < tag.Length - 1)
+        {
+            tag = tag[(dotIndex + 1)..];
+        }
+
+        tag = tag.Replace('_', ' ');
+        return string.IsNullOrWhiteSpace(tag) ? "-" : tag;
+    }
 
     private static double GetKillFeedTime(KillFeedEntry entry) => entry.ReplicatedWorldTimeSecondsDouble ?? entry.ReplicatedWorldTimeSeconds ?? 0;
 

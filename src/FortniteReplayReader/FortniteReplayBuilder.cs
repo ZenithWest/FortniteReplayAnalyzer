@@ -724,22 +724,49 @@ public class FortniteReplayBuilder
 
     private WeaponData? ResolveWeapon(PlayerData? player)
     {
-        if (player?.CurrentWeapon is not uint weaponChannel)
+        if (player is null)
         {
             return null;
         }
 
-        if (_weapons.TryGetValue(weaponChannel, out var weapon))
+        if (player.CurrentWeapon is uint weaponChannel)
         {
-            return weapon;
+            if (_weapons.TryGetValue(weaponChannel, out var weapon))
+            {
+                return weapon;
+            }
+
+            if (_unknownWeapons.TryGetValue(weaponChannel, out var unknownWeapon))
+            {
+                return unknownWeapon;
+            }
         }
 
-        if (_unknownWeapons.TryGetValue(weaponChannel, out var unknownWeapon))
+        var stateChannel = _players.FirstOrDefault(entry => ReferenceEquals(entry.Value, player)).Key;
+        if (stateChannel == 0)
         {
-            return unknownWeapon;
+            return null;
         }
 
-        return null;
+        var actorIds = _pawnChannelToStateChannel
+            .Where(entry => entry.Value == stateChannel)
+            .Select(entry => _channelToActor.TryGetValue(entry.Key, out var actorId) ? (uint?)actorId : null)
+            .Where(actorId => actorId.HasValue)
+            .Select(actorId => actorId!.Value)
+            .ToHashSet();
+
+        if (actorIds.Count == 0)
+        {
+            return null;
+        }
+
+        return _weapons.Values
+            .Concat(_unknownWeapons.Values)
+            .Where(weapon => (weapon.OwnerActor.HasValue && actorIds.Contains(weapon.OwnerActor.Value))
+                             || (weapon.InstigatorActor.HasValue && actorIds.Contains(weapon.InstigatorActor.Value)))
+            .OrderByDescending(weapon => weapon.LastFireTimeVerified ?? float.MinValue)
+            .ThenByDescending(weapon => weapon.bIsEquippingWeapon == true)
+            .FirstOrDefault();
     }
 
     private static string NormalizeWeaponType(string? weaponAssetName, string? weaponClassName, string? weaponDisplayName)

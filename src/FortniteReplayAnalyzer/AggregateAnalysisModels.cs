@@ -25,3 +25,10 @@ internal sealed class DamageTimelinePoint
     public double TimeValue { get; init; }
     public float Damage { get; init; }
 }
+
+internal sealed class MatchTrendRow
+{
+    public required string Label { get; init; }
+    public float DamageToPlayersAndBots { get; init; }
+    public int Kills { get; init; }
+}
