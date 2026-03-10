@@ -535,8 +535,7 @@ public partial class FortniteReplayAnalyzer
         {
             var events = replay.DamageEvents
                 .Where(evt => IsDamageByPlayer(player, evt))
-                .Where(evt => (_chkTimelinePlayers?.Checked ?? true) || evt.TargetIsBot)
-                .Where(evt => (_chkTimelineBots?.Checked ?? true) || !evt.TargetIsBot)
+                .Where(evt => ShouldIncludeTimelineDamageEvent(replay, evt))
                 .OrderBy(evt => GetDamageTime(evt))
                 .ToList();
 
@@ -562,6 +561,18 @@ public partial class FortniteReplayAnalyzer
         }
 
         _damageTimelinePanel.Invalidate();
+    }
+
+    private bool ShouldIncludeTimelineDamageEvent(FortniteReplay replay, DamageEvent evt)
+    {
+        var category = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
+
+        return category switch
+        {
+            DamageParticipantCategory.Player => _chkTimelinePlayers?.Checked ?? true,
+            DamageParticipantCategory.Bot => _chkTimelineBots?.Checked ?? true,
+            _ => false
+        };
     }
 
     private static bool IsDamageByPlayer(PlayerData player, DamageEvent evt)
