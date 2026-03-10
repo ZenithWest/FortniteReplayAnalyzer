@@ -8,6 +8,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+cmds/
+tmp_probe/
+
 # User-specific files
 *.rsuser
 *.suo

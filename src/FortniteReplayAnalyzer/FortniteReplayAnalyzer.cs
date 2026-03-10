@@ -57,6 +57,7 @@ public partial class FortniteReplayAnalyzer : Form
     private Label? _lblReplayHideHint;
     private ContextMenuStrip? _replayBrowserContextMenu;
     private ToolStripMenuItem? _loadReplayMenuItem;
+    private ToolStripMenuItem? _loadAllReplayMenuItem;
     private ToolStripMenuItem? _unloadReplayMenuItem;
     private ToolStripMenuItem? _stopReplayMenuItem;
     private ReplayBrowserRow? _contextMenuReplayRow;
@@ -65,6 +66,9 @@ public partial class FortniteReplayAnalyzer : Form
     private int _lastExpandedReplayPaneWidth = ExpandedReplayPaneWidth;
     private readonly HashSet<DataGridView> _iconTextConfiguredGrids = [];
     private PictureBox? _picSelectedPlayer;
+    private int _replaySelectionAnchorIndex = -1;
+    private bool _ignoreReplayBrowserCellClick;
+    private bool _ignoreReplaySelectionChanged;
 
     private string ReplayFolder => string.IsNullOrWhiteSpace(_settings.DefaultReplaysFolder) ? DefaultReplayFolder : _settings.DefaultReplaysFolder;
 
@@ -305,12 +309,14 @@ public partial class FortniteReplayAnalyzer : Form
     {
         _replayBrowserContextMenu = new ContextMenuStrip();
         _loadReplayMenuItem = new ToolStripMenuItem("Load", null, (_, _) => QueueSelectedReplayLoad());
+        _loadAllReplayMenuItem = new ToolStripMenuItem("Load All", null, (_, _) => QueueAllReplayLoads());
         _unloadReplayMenuItem = new ToolStripMenuItem("Unload", null, (_, _) => UnloadSelectedReplay());
         _stopReplayMenuItem = new ToolStripMenuItem("Stop", null, (_, _) => StopSelectedReplayLoad());
 
         _replayBrowserContextMenu.Items.AddRange(
         [
             _loadReplayMenuItem,
+            _loadAllReplayMenuItem,
             _unloadReplayMenuItem,
             _stopReplayMenuItem
         ]);
@@ -325,11 +331,14 @@ public partial class FortniteReplayAnalyzer : Form
             }
 
             _loadReplayMenuItem!.Tag = row;
+            _loadAllReplayMenuItem!.Tag = row;
             _unloadReplayMenuItem!.Tag = row;
             _stopReplayMenuItem!.Tag = row;
-            _loadReplayMenuItem!.Enabled = !IsReplayLoaded(row) && !row.IsQueued && !row.IsLoading;
-            _unloadReplayMenuItem!.Enabled = IsReplayLoaded(row);
-            _stopReplayMenuItem!.Enabled = row.IsQueued || row.IsLoading;
+            var targetRows = GetReplayRowsForContextAction(row);
+            _loadReplayMenuItem!.Enabled = targetRows.Any(candidate => !IsReplayLoaded(candidate) && !candidate.IsQueued && !candidate.IsLoading);
+            _loadAllReplayMenuItem!.Enabled = _replayRows.Any(candidate => !IsReplayLoaded(candidate) && !candidate.IsQueued && !candidate.IsLoading);
+            _unloadReplayMenuItem!.Enabled = targetRows.Any(IsReplayLoaded);
+            _stopReplayMenuItem!.Enabled = targetRows.Any(candidate => candidate.IsQueued || candidate.IsLoading);
         };
         dgvReplayBrowser.ContextMenuStrip = _replayBrowserContextMenu;
     }
@@ -413,6 +422,7 @@ public partial class FortniteReplayAnalyzer : Form
         dgvReplayBrowser.CellClick += async (_, e) => await HandleReplayBrowserCellClickAsync(e);
         dgvReplayBrowser.ColumnHeaderMouseClick += (_, e) => SortReplayRows(dgvReplayBrowser.Columns[e.ColumnIndex].Name);
         dgvReplayBrowser.CellMouseDown += HandleReplayBrowserCellMouseDown;
+        dgvReplayBrowser.KeyDown += HandleReplayBrowserKeyDown;
 
 
         dgvKillFeed.CellClick += (_, e) => HandleKillFeedLinkClick(e);
@@ -427,6 +437,7 @@ public partial class FortniteReplayAnalyzer : Form
     private void ConfigureGrids()
     {
         ConfigureReadOnlyGrid(dgvReplayBrowser, fullRowSelect: true);
+        dgvReplayBrowser.MultiSelect = true;
         ConfigureReadOnlyGrid(dgvGameStats, fullRowSelect: false);
         ConfigureReadOnlyGrid(dgvKillFeed, fullRowSelect: true);
         ConfigureReadOnlyGrid(dgvCombatEvents, fullRowSelect: true);
@@ -594,6 +605,11 @@ public partial class FortniteReplayAnalyzer : Form
 
     private async Task HandleReplaySelectionChangedAsync()
     {
+        if (_ignoreReplaySelectionChanged)
+        {
+            return;
+        }
+
         if (_suppressReplaySelectionChanged || dgvReplayBrowser.CurrentRow?.DataBoundItem is not ReplayBrowserRow row)
         {
             return;
@@ -613,6 +629,14 @@ public partial class FortniteReplayAnalyzer : Form
 
     private async Task HandleReplayBrowserCellClickAsync(DataGridViewCellEventArgs e)
     {
+        if (_ignoreReplayBrowserCellClick)
+        {
+            _ignoreReplayBrowserCellClick = false;
+            _ignoreReplaySelectionChanged = false;
+            RestoreReplayBrowserCurrentRow();
+            return;
+        }
+
         if (e.RowIndex < 0 || e.RowIndex >= dgvReplayBrowser.Rows.Count)
         {
             return;
@@ -1670,13 +1694,30 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void HandleReplayBrowserCellMouseDown(object? sender, DataGridViewCellMouseEventArgs e)
     {
-        if (e.Button != MouseButtons.Right || e.RowIndex < 0 || e.RowIndex >= dgvReplayBrowser.Rows.Count)
+        if (e.RowIndex < 0 || e.RowIndex >= dgvReplayBrowser.Rows.Count)
         {
             _contextMenuReplayRow = null;
             return;
         }
 
-        _contextMenuReplayRow = dgvReplayBrowser.Rows[e.RowIndex].DataBoundItem as ReplayBrowserRow;
+        if (e.Button == MouseButtons.Left)
+        {
+            if ((ModifierKeys & Keys.Shift) == Keys.Shift)
+            {
+                _ignoreReplaySelectionChanged = true;
+                ApplyReplayRangeSelection(e.RowIndex);
+                _ignoreReplayBrowserCellClick = true;
+                return;
+            }
+
+            _replaySelectionAnchorIndex = e.RowIndex;
+            return;
+        }
+
+        if (e.Button == MouseButtons.Right)
+        {
+            _contextMenuReplayRow = dgvReplayBrowser.Rows[e.RowIndex].DataBoundItem as ReplayBrowserRow;
+        }
     }
 
     private ReplayBrowserRow? GetReplayRowForContextMenu()
@@ -1696,13 +1737,27 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void QueueSelectedReplayLoad()
     {
-        var row = _contextMenuReplayRow ?? _loadReplayMenuItem?.Tag as ReplayBrowserRow ?? GetReplayRowForContextMenu();
-        if (row is null)
+        var rows = GetReplayRowsForContextAction();
+        if (rows.Count == 0)
         {
             return;
         }
 
-        QueueReplayLoad(row, ParseMode.Full);
+        foreach (var row in rows)
+        {
+            QueueReplayLoad(row, ParseMode.Full);
+        }
+
+        ClearReplayBrowserContextTarget();
+    }
+
+    private void QueueAllReplayLoads()
+    {
+        foreach (var row in _replayRows)
+        {
+            QueueReplayLoad(row, ParseMode.Full);
+        }
+
         ClearReplayBrowserContextTarget();
     }
 
@@ -1764,13 +1819,17 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void UnloadSelectedReplay()
     {
-        var row = _contextMenuReplayRow ?? _unloadReplayMenuItem?.Tag as ReplayBrowserRow ?? GetReplayRowForContextMenu();
-        if (row is null)
+        var rows = GetReplayRowsForContextAction();
+        if (rows.Count == 0)
         {
             return;
         }
 
-        UnloadReplay(row);
+        foreach (var row in rows)
+        {
+            UnloadReplay(row);
+        }
+
         ClearReplayBrowserContextTarget();
     }
 
@@ -1793,13 +1852,17 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void StopSelectedReplayLoad()
     {
-        var row = _contextMenuReplayRow ?? _stopReplayMenuItem?.Tag as ReplayBrowserRow ?? GetReplayRowForContextMenu();
-        if (row is null)
+        var rows = GetReplayRowsForContextAction();
+        if (rows.Count == 0)
         {
             return;
         }
 
-        StopReplayLoad(row);
+        foreach (var row in rows)
+        {
+            StopReplayLoad(row);
+        }
+
         ClearReplayBrowserContextTarget();
     }
 
@@ -1807,8 +1870,103 @@ public partial class FortniteReplayAnalyzer : Form
     {
         _contextMenuReplayRow = null;
         if (_loadReplayMenuItem is not null) _loadReplayMenuItem.Tag = null;
+        if (_loadAllReplayMenuItem is not null) _loadAllReplayMenuItem.Tag = null;
         if (_unloadReplayMenuItem is not null) _unloadReplayMenuItem.Tag = null;
         if (_stopReplayMenuItem is not null) _stopReplayMenuItem.Tag = null;
+    }
+
+    private List<ReplayBrowserRow> GetReplayRowsForContextAction(ReplayBrowserRow? contextRow = null)
+    {
+        contextRow ??= _contextMenuReplayRow ?? _loadReplayMenuItem?.Tag as ReplayBrowserRow ?? GetReplayRowForContextMenu();
+        if (contextRow is null)
+        {
+            return [];
+        }
+
+        var selectedRows = dgvReplayBrowser.SelectedRows
+            .Cast<DataGridViewRow>()
+            .Select(gridRow => gridRow.DataBoundItem as ReplayBrowserRow)
+            .Where(row => row is not null)
+            .Cast<ReplayBrowserRow>()
+            .Distinct()
+            .ToList();
+
+        if (selectedRows.Count > 1 && selectedRows.Contains(contextRow))
+        {
+            return selectedRows;
+        }
+
+        return [contextRow];
+    }
+
+    private void HandleReplayBrowserKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (!(e.Control && e.KeyCode == Keys.A))
+        {
+            return;
+        }
+
+        _suppressReplaySelectionChanged = true;
+        try
+        {
+            foreach (DataGridViewRow row in dgvReplayBrowser.Rows)
+            {
+                row.Selected = true;
+            }
+
+            RestoreReplayBrowserCurrentRow();
+        }
+        finally
+        {
+            _suppressReplaySelectionChanged = false;
+        }
+
+        e.Handled = true;
+        e.SuppressKeyPress = true;
+    }
+
+    private void ApplyReplayRangeSelection(int clickedRowIndex)
+    {
+        var anchorIndex = _replaySelectionAnchorIndex >= 0
+            ? _replaySelectionAnchorIndex
+            : dgvReplayBrowser.CurrentRow?.Index ?? clickedRowIndex;
+
+        var start = Math.Min(anchorIndex, clickedRowIndex);
+        var end = Math.Max(anchorIndex, clickedRowIndex);
+
+        _suppressReplaySelectionChanged = true;
+        try
+        {
+            dgvReplayBrowser.ClearSelection();
+            for (var index = start; index <= end; index++)
+            {
+                dgvReplayBrowser.Rows[index].Selected = true;
+            }
+
+            RestoreReplayBrowserCurrentRow();
+        }
+        finally
+        {
+            _suppressReplaySelectionChanged = false;
+        }
+    }
+
+    private void RestoreReplayBrowserCurrentRow()
+    {
+        if (_selectedReplayRow is null || dgvReplayBrowser.Columns.Count == 0)
+        {
+            dgvReplayBrowser.CurrentCell = null;
+            return;
+        }
+
+        var selectedIndex = _replayRows.IndexOf(_selectedReplayRow);
+        if (selectedIndex < 0 || selectedIndex >= dgvReplayBrowser.Rows.Count)
+        {
+            dgvReplayBrowser.CurrentCell = null;
+            return;
+        }
+
+        dgvReplayBrowser.CurrentCell = dgvReplayBrowser.Rows[selectedIndex].Cells[0];
     }
 
     private void StopReplayLoad(ReplayBrowserRow row)

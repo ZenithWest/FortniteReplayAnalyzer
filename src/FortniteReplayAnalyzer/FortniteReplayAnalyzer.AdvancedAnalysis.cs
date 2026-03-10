@@ -14,6 +14,8 @@ public partial class FortniteReplayAnalyzer
     private Label? _lblWeaponStatsStatus;
     private DataGridView? _dgvWeaponStats;
     private Button? _btnWeaponStatsStop;
+    private ProgressBar? _weaponStatsProgressBar;
+    private CheckBox? _chkWeaponIncludeBots;
     private CancellationTokenSource? _weaponStatsLoadCts;
     private ComboBox? _cmbOverallRange;
     private DateTimePicker? _dtOverallFrom;
@@ -65,15 +67,15 @@ public partial class FortniteReplayAnalyzer
         page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        page.RowStyles.Add(new RowStyle(SizeType.Absolute, 260F));
         page.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var filters = CreateFilterFlowPanel();
         filters.AutoScroll = false;
 
         _cmbWeaponRange = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150 };
-        _cmbWeaponRange.Items.AddRange(["All-time", "Last 7 days", "Last 30 days", "Custom"]);
-        _cmbWeaponRange.SelectedIndex = 0;
+        _cmbWeaponRange.Items.AddRange(["Current Match", "All-time", "Last 7 days", "Last 30 days", "Custom"]);
+        _cmbWeaponRange.SelectedIndex = 1;
         _cmbWeaponRange.SelectedIndexChanged += async (_, _) => await RefreshWeaponStatsPageAsync();
 
         _dtWeaponFrom = new DateTimePicker { Format = DateTimePickerFormat.Short, Enabled = false, Width = 120 };
@@ -94,6 +96,8 @@ public partial class FortniteReplayAnalyzer
         filters.Controls.Add(_dtWeaponTo);
         filters.Controls.Add(btnRefresh);
         filters.Controls.Add(_btnWeaponStatsStop);
+        _chkWeaponIncludeBots = CreateFilterCheckBox("Include bot damage", async (_, _) => await RefreshWeaponStatsPageAsync(), true);
+        filters.Controls.Add(_chkWeaponIncludeBots);
 
         _lblWeaponStatsStatus = new Label
         {
@@ -101,22 +105,48 @@ public partial class FortniteReplayAnalyzer
             Text = "Weapon stats load on demand for the selected date range."
         };
 
+        _weaponStatsProgressBar = new ProgressBar
+        {
+            Dock = DockStyle.Top,
+            Height = 18,
+            Minimum = 0,
+            Maximum = 1,
+            Value = 0,
+            Style = ProgressBarStyle.Continuous
+        };
+
         _dgvWeaponStats = new DataGridView { Name = "dgvWeaponStats" };
         ConfigureReadOnlyGrid(_dgvWeaponStats, fullRowSelect: true);
         _dgvWeaponStats.AutoGenerateColumns = false;
         _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.WeaponType), HeaderText = "Weapon Type", DataPropertyName = nameof(WeaponStatsRow.WeaponType), FillWeight = 110 });
         _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.WeaponName), HeaderText = "Weapon", DataPropertyName = nameof(WeaponStatsRow.WeaponName), FillWeight = 180 });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.MatchesUsed), HeaderText = "Matches", DataPropertyName = nameof(WeaponStatsRow.MatchesUsed), FillWeight = 70 });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.KillOrDownCount), HeaderText = "Kills/Downs", DataPropertyName = nameof(WeaponStatsRow.KillOrDownCount), FillWeight = 85 });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.EliminationCount), HeaderText = "Elims", DataPropertyName = nameof(WeaponStatsRow.EliminationCount), FillWeight = 65 });
         _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.Hits), HeaderText = "Hits", DataPropertyName = nameof(WeaponStatsRow.Hits), FillWeight = 65 });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.HitsToPlayers), HeaderText = "Hits P", DataPropertyName = nameof(WeaponStatsRow.HitsToPlayers), FillWeight = 65 });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.HitsToBots), HeaderText = "Hits B", DataPropertyName = nameof(WeaponStatsRow.HitsToBots), FillWeight = 65 });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.HitsToNpcs), HeaderText = "Hits NPC", DataPropertyName = nameof(WeaponStatsRow.HitsToNpcs), FillWeight = 72 });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.HitsToStructures), HeaderText = "Hits Struct", DataPropertyName = nameof(WeaponStatsRow.HitsToStructures), FillWeight = 82 });
         _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.CriticalHits), HeaderText = "Crit Hits", DataPropertyName = nameof(WeaponStatsRow.CriticalHits), FillWeight = 72 });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.ShieldHits), HeaderText = "Shield Hits", DataPropertyName = nameof(WeaponStatsRow.ShieldHits), FillWeight = 78 });
         _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.FatalHits), HeaderText = "Fatal", DataPropertyName = nameof(WeaponStatsRow.FatalHits), FillWeight = 62 });
-        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.TotalDamage), HeaderText = "Damage", DataPropertyName = nameof(WeaponStatsRow.TotalDamage), FillWeight = 84, DefaultCellStyle = new DataGridViewCellStyle { Format = "0.#" } });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.TotalDamage), HeaderText = "Total Damage", DataPropertyName = nameof(WeaponStatsRow.TotalDamage), FillWeight = 90, DefaultCellStyle = new DataGridViewCellStyle { Format = "0.#" } });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.DamageToPlayers), HeaderText = "Dmg P", DataPropertyName = nameof(WeaponStatsRow.DamageToPlayers), FillWeight = 75, DefaultCellStyle = new DataGridViewCellStyle { Format = "0.#" } });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.DamageToBots), HeaderText = "Dmg B", DataPropertyName = nameof(WeaponStatsRow.DamageToBots), FillWeight = 75, DefaultCellStyle = new DataGridViewCellStyle { Format = "0.#" } });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.DamageToNpcs), HeaderText = "Dmg NPC", DataPropertyName = nameof(WeaponStatsRow.DamageToNpcs), FillWeight = 80, DefaultCellStyle = new DataGridViewCellStyle { Format = "0.#" } });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.DamageToStructures), HeaderText = "Dmg Struct", DataPropertyName = nameof(WeaponStatsRow.DamageToStructures), FillWeight = 85, DefaultCellStyle = new DataGridViewCellStyle { Format = "0.#" } });
         _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.AvgDamage), HeaderText = "Avg Hit", DataPropertyName = nameof(WeaponStatsRow.AvgDamage), FillWeight = 84, DefaultCellStyle = new DataGridViewCellStyle { Format = "0.#" } });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.AvgDamagePerMatch), HeaderText = "Avg Dmg/Match", DataPropertyName = nameof(WeaponStatsRow.AvgDamagePerMatch), FillWeight = 92, DefaultCellStyle = new DataGridViewCellStyle { Format = "0.#" } });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.AvgHitsPerMatch), HeaderText = "Avg Hits/Match", DataPropertyName = nameof(WeaponStatsRow.AvgHitsPerMatch), FillWeight = 92, DefaultCellStyle = new DataGridViewCellStyle { Format = "0.#" } });
+        _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.AvgKillOrDownsPerMatch), HeaderText = "Avg K/Dn Match", DataPropertyName = nameof(WeaponStatsRow.AvgKillOrDownsPerMatch), FillWeight = 96, DefaultCellStyle = new DataGridViewCellStyle { Format = "0.#" } });
         _dgvWeaponStats.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(WeaponStatsRow.CriticalRate), HeaderText = "Crit %", DataPropertyName = nameof(WeaponStatsRow.CriticalRate), FillWeight = 70, DefaultCellStyle = new DataGridViewCellStyle { Format = "0.#'%'"} });
         _dgvWeaponStats.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
 
         page.Controls.Add(filters, 0, 0);
         page.Controls.Add(_lblWeaponStatsStatus, 0, 1);
-        page.Controls.Add(_dgvWeaponStats, 0, 2);
+        page.Controls.Add(_weaponStatsProgressBar, 0, 2);
+        page.Controls.Add(_dgvWeaponStats, 0, 3);
         return page;
     }
 
@@ -274,7 +304,7 @@ public partial class FortniteReplayAnalyzer
 
     private async Task RefreshWeaponStatsPageAsync()
     {
-        if (_dgvWeaponStats is null || _lblWeaponStatsStatus is null)
+        if (_dgvWeaponStats is null || _lblWeaponStatsStatus is null || _weaponStatsProgressBar is null)
         {
             return;
         }
@@ -285,37 +315,19 @@ public partial class FortniteReplayAnalyzer
         var cancellationToken = _weaponStatsLoadCts.Token;
         _lblWeaponStatsStatus.Text = "Building weapon stats from already-loaded replays...";
         if (_btnWeaponStatsStop is not null) _btnWeaponStatsStop.Enabled = true;
+        _weaponStatsProgressBar.Maximum = 1;
+        _weaponStatsProgressBar.Value = 0;
 
         try
         {
             var rows = await GetAggregateReplayRowsAsync(_cmbWeaponRange, _dtWeaponFrom, _dtWeaponTo, cancellationToken);
-            var weaponRows = await Task.Run(() =>
+            _weaponStatsProgressBar.Maximum = Math.Max(1, rows.Count);
+            var progress = new Progress<int>(value =>
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                return rows
-                    .SelectMany(BuildWeaponStatsRowsForReplay)
-                    .GroupBy(row => new { row.WeaponType, row.WeaponName })
-                    .Select(group =>
-                    {
-                        var hits = group.Sum(x => x.Hits);
-                        var crits = group.Sum(x => x.CriticalHits);
-                        var damage = group.Sum(x => x.TotalDamage);
-                        return new WeaponStatsRow
-                        {
-                            WeaponType = group.Key.WeaponType,
-                            WeaponName = group.Key.WeaponName,
-                            Hits = hits,
-                            CriticalHits = crits,
-                            FatalHits = group.Sum(x => x.FatalHits),
-                            TotalDamage = damage,
-                            AvgDamage = hits == 0 ? 0F : damage / hits,
-                            CriticalRate = hits == 0 ? 0F : (float)crits / hits * 100F
-                        };
-                    })
-                    .OrderByDescending(row => row.TotalDamage)
-                    .ThenBy(row => row.WeaponType)
-                    .ToList();
-            }, cancellationToken);
+                _weaponStatsProgressBar.Value = Math.Max(_weaponStatsProgressBar.Minimum, Math.Min(_weaponStatsProgressBar.Maximum, value));
+            });
+
+            var weaponRows = await Task.Run(() => BuildWeaponStatsSummary(rows, _chkWeaponIncludeBots?.Checked ?? true, progress, cancellationToken), cancellationToken);
 
             _dgvWeaponStats.DataSource = weaponRows;
             _lblWeaponStatsStatus.Text = rows.Count == 0
@@ -379,6 +391,16 @@ public partial class FortniteReplayAnalyzer
     private Task<List<ReplayBrowserRow>> GetAggregateReplayRowsAsync(ComboBox? rangeCombo, DateTimePicker? fromPicker, DateTimePicker? toPicker, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (GetSelectedRange(rangeCombo) == AggregateRangeOption.CurrentMatch)
+        {
+            if (_selectedReplayRow?.Replay is not null)
+            {
+                return Task.FromResult(new List<ReplayBrowserRow> { _selectedReplayRow });
+            }
+
+            return Task.FromResult(new List<ReplayBrowserRow>());
+        }
+
         var filtered = _replayRows
             .Where(row => IsReplayInAggregateRange(row, GetSelectedRange(rangeCombo), fromPicker, toPicker))
             .Where(row => row.Replay is not null)
@@ -389,9 +411,10 @@ public partial class FortniteReplayAnalyzer
 
     private static AggregateRangeOption GetSelectedRange(ComboBox? comboBox) => comboBox?.SelectedIndex switch
     {
-        1 => AggregateRangeOption.Last7Days,
-        2 => AggregateRangeOption.Last30Days,
-        3 => AggregateRangeOption.Custom,
+        0 => AggregateRangeOption.CurrentMatch,
+        2 => AggregateRangeOption.Last7Days,
+        3 => AggregateRangeOption.Last30Days,
+        4 => AggregateRangeOption.Custom,
         _ => AggregateRangeOption.AllTime
     };
 
@@ -415,49 +438,176 @@ public partial class FortniteReplayAnalyzer
         };
     }
 
-    private IEnumerable<WeaponStatsRow> BuildWeaponStatsRowsForReplay(ReplayBrowserRow row)
+    private List<WeaponStatsRow> BuildWeaponStatsSummary(
+        IReadOnlyList<ReplayBrowserRow> rows,
+        bool includeBotDamage,
+        IProgress<int>? progress,
+        CancellationToken cancellationToken)
+    {
+        var accumulators = new Dictionary<(string WeaponType, string WeaponName), WeaponStatsAccumulator>();
+
+        for (var index = 0; index < rows.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            BuildWeaponStatsRowsForReplay(rows[index], includeBotDamage, accumulators);
+            progress?.Report(index + 1);
+        }
+
+        return accumulators.Values
+            .Select(accumulator =>
+            {
+                var matchesUsed = Math.Max(1, accumulator.MatchKeys.Count);
+                return new WeaponStatsRow
+                {
+                    WeaponType = accumulator.WeaponType,
+                    WeaponName = accumulator.WeaponName,
+                    MatchesUsed = matchesUsed,
+                    KillOrDownCount = accumulator.KillOrDownCount,
+                    EliminationCount = accumulator.EliminationCount,
+                    Hits = accumulator.Hits,
+                    HitsToPlayers = accumulator.HitsToPlayers,
+                    HitsToBots = accumulator.HitsToBots,
+                    HitsToNpcs = accumulator.HitsToNpcs,
+                    HitsToStructures = accumulator.HitsToStructures,
+                    CriticalHits = accumulator.CriticalHits,
+                    ShieldHits = accumulator.ShieldHits,
+                    FatalHits = accumulator.FatalHits,
+                    TotalDamage = accumulator.TotalDamage,
+                    DamageToPlayers = accumulator.DamageToPlayers,
+                    DamageToBots = accumulator.DamageToBots,
+                    DamageToNpcs = accumulator.DamageToNpcs,
+                    DamageToStructures = accumulator.DamageToStructures,
+                    AvgDamage = accumulator.Hits == 0 ? 0F : accumulator.TotalDamage / accumulator.Hits,
+                    AvgDamagePerMatch = accumulator.TotalDamage / matchesUsed,
+                    AvgHitsPerMatch = (float)accumulator.Hits / matchesUsed,
+                    AvgKillOrDownsPerMatch = (float)accumulator.KillOrDownCount / matchesUsed,
+                    CriticalRate = accumulator.Hits == 0 ? 0F : (float)accumulator.CriticalHits / accumulator.Hits * 100F
+                };
+            })
+            .OrderByDescending(row => row.TotalDamage)
+            .ThenByDescending(row => row.KillOrDownCount)
+            .ThenBy(row => row.WeaponType)
+            .ToList();
+    }
+
+    private void BuildWeaponStatsRowsForReplay(
+        ReplayBrowserRow row,
+        bool includeBotDamage,
+        IDictionary<(string WeaponType, string WeaponName), WeaponStatsAccumulator> accumulators)
     {
         var replay = row.Replay;
         var owner = replay is null ? null : GetReplayOwner(replay);
         if (replay is null || owner is null)
         {
-            yield break;
+            return;
         }
 
-        var relevantEvents = replay.DamageEvents
-            .Where(evt => IsDamageByPlayer(owner, evt))
-            .Where(evt => IsCombatDamageParticipant(ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot)))
-            .Select(evt => new
-            {
-                Event = evt,
-                WeaponType = GetWeaponStatsTypeLabel(replay, evt),
-                WeaponName = GetWeaponStatsNameLabel(replay, evt)
-            })
-            .Where(x => !string.IsNullOrWhiteSpace(x.WeaponType) && !string.Equals(x.WeaponType, "Unknown", StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        var matchKey = row.FilePath;
 
-        foreach (var group in relevantEvents
-                     .GroupBy(x => new
-                     {
-                         x.WeaponType,
-                         x.WeaponName
-                     }))
+        foreach (var evt in replay.DamageEvents.Where(evt => IsDamageByPlayer(owner, evt)))
         {
-            var hits = group.Count();
-            var crits = group.Count(x => x.Event.IsCritical == true);
-            var damage = group.Sum(x => x.Event.Magnitude ?? 0F);
-            yield return new WeaponStatsRow
+            var category = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
+            if (!includeBotDamage && category == DamageParticipantCategory.Bot)
             {
-                WeaponType = group.Key.WeaponType,
-                WeaponName = group.Key.WeaponName,
-                Hits = hits,
-                CriticalHits = crits,
-                FatalHits = group.Count(x => x.Event.IsFatal == true),
-                TotalDamage = damage,
-                AvgDamage = hits == 0 ? 0F : damage / hits,
-                CriticalRate = hits == 0 ? 0F : (float)crits / hits * 100F
-            };
+                continue;
+            }
+
+            var weaponType = GetWeaponStatsTypeLabel(replay, evt);
+            var weaponName = GetWeaponStatsNameLabel(replay, evt);
+            if (string.IsNullOrWhiteSpace(weaponType) || string.Equals(weaponType, "Unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var accumulator = GetOrCreateWeaponAccumulator(accumulators, weaponType, weaponName);
+            accumulator.MatchKeys.Add(matchKey);
+            accumulator.Hits++;
+            accumulator.TotalDamage += evt.Magnitude ?? 0F;
+
+            if (evt.IsCritical == true)
+            {
+                accumulator.CriticalHits++;
+            }
+
+            if (evt.IsFatal == true)
+            {
+                accumulator.FatalHits++;
+            }
+
+            if (evt.IsShield == true)
+            {
+                accumulator.ShieldHits++;
+            }
+
+            switch (category)
+            {
+                case DamageParticipantCategory.Player:
+                    accumulator.HitsToPlayers++;
+                    accumulator.DamageToPlayers += evt.Magnitude ?? 0F;
+                    break;
+                case DamageParticipantCategory.Bot:
+                    accumulator.HitsToBots++;
+                    accumulator.DamageToBots += evt.Magnitude ?? 0F;
+                    break;
+                case DamageParticipantCategory.Npc:
+                    accumulator.HitsToNpcs++;
+                    accumulator.DamageToNpcs += evt.Magnitude ?? 0F;
+                    break;
+                case DamageParticipantCategory.Structure:
+                    accumulator.HitsToStructures++;
+                    accumulator.DamageToStructures += evt.Magnitude ?? 0F;
+                    break;
+            }
         }
+
+        foreach (var entry in replay.KillFeed.Where(entry => MatchesResolvedKillFeedActor(replay, owner, entry) && !entry.IsRevived))
+        {
+            var target = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
+            if (!includeBotDamage && (target?.IsBot ?? entry.PlayerIsBot))
+            {
+                continue;
+            }
+
+            var weaponLabel = NormalizeKillReasonToWeaponLabel(FormatKillFeedReason(replay, entry));
+            if (string.IsNullOrWhiteSpace(weaponLabel))
+            {
+                continue;
+            }
+
+            var accumulator = GetOrCreateWeaponAccumulator(accumulators, weaponLabel, weaponLabel);
+            accumulator.MatchKeys.Add(matchKey);
+
+            if (entry.IsDowned || IsDirectKillWithoutDown(replay, entry))
+            {
+                accumulator.KillOrDownCount++;
+            }
+
+            if (!entry.IsDowned)
+            {
+                accumulator.EliminationCount++;
+            }
+        }
+    }
+
+    private static WeaponStatsAccumulator GetOrCreateWeaponAccumulator(
+        IDictionary<(string WeaponType, string WeaponName), WeaponStatsAccumulator> accumulators,
+        string weaponType,
+        string weaponName)
+    {
+        weaponType = weaponType.Trim();
+        weaponName = weaponName.Trim();
+        var key = (weaponType.ToUpperInvariant(), weaponName.ToUpperInvariant());
+        if (!accumulators.TryGetValue(key, out var accumulator))
+        {
+            accumulator = new WeaponStatsAccumulator
+            {
+                WeaponType = weaponType,
+                WeaponName = weaponName
+            };
+            accumulators[key] = accumulator;
+        }
+
+        return accumulator;
     }
 
     private string GetWeaponStatsTypeLabel(FortniteReplay replay, DamageEvent evt)
@@ -536,6 +686,31 @@ public partial class FortniteReplayAnalyzer
         }
 
         return reason.Trim();
+    }
+
+    private static bool IsDirectKillWithoutDown(FortniteReplay replay, KillFeedEntry entry)
+    {
+        if (entry.IsDowned || entry.IsRevived)
+        {
+            return false;
+        }
+
+        var currentTime = GetKillFeedTime(entry);
+        foreach (var priorEntry in replay.KillFeed
+                     .Where(candidate => !ReferenceEquals(candidate, entry)
+                                         && MatchesKillFeedTarget(candidate, entry.PlayerId, entry.PlayerName)
+                                         && GetKillFeedTime(candidate) <= currentTime)
+                     .OrderByDescending(GetKillFeedTime))
+        {
+            if (priorEntry.IsRevived)
+            {
+                break;
+            }
+
+            return !priorEntry.IsDowned;
+        }
+
+        return true;
     }
 
     private IEnumerable<DetailRow> BuildOverallStatisticsRows(IEnumerable<ReplayBrowserRow> rows)
@@ -826,12 +1001,12 @@ public partial class FortniteReplayAnalyzer
         using var titleFont = new Font("Segoe UI Semibold", 9F, FontStyle.Bold);
         using var barBrush = new SolidBrush(barColor);
 
-        var chart = Rectangle.FromLTRB(bounds.Left + 90, bounds.Top + 24, bounds.Right - 18, bounds.Bottom - 18);
+        var chart = Rectangle.FromLTRB(bounds.Left + 52, bounds.Top + 24, bounds.Right - 18, bounds.Bottom - 34);
         graphics.DrawString(title, titleFont, textBrush, bounds.Left + 12, bounds.Top + 4);
-        PaintHorizontalBarChart(graphics, chart, values, barBrush, axisPen, gridPen, textBrush, font);
+        PaintVerticalBarChart(graphics, chart, values, barBrush, axisPen, gridPen, textBrush, font);
     }
 
-    private static void PaintHorizontalBarChart(Graphics graphics, Rectangle bounds, List<(double Value, string Label)> values, Brush barBrush, Pen axisPen, Pen gridPen, Brush textBrush, Font font)
+    private static void PaintVerticalBarChart(Graphics graphics, Rectangle bounds, List<(double Value, string Label)> values, Brush barBrush, Pen axisPen, Pen gridPen, Brush textBrush, Font font)
     {
         graphics.DrawRectangle(axisPen, bounds);
         if (values.Count == 0)
@@ -843,21 +1018,21 @@ public partial class FortniteReplayAnalyzer
         var maxValue = Math.Max(1D, values.Max(x => x.Value));
         for (var i = 0; i <= 4; i++)
         {
-            var x = bounds.Left + (bounds.Width * i / 4F);
-            graphics.DrawLine(gridPen, x, bounds.Top, x, bounds.Bottom);
+            var y = bounds.Bottom - (bounds.Height * i / 4F);
+            graphics.DrawLine(gridPen, bounds.Left, y, bounds.Right, y);
             var tickValue = maxValue * i / 4D;
             var tickText = tickValue.ToString("0.#", CultureInfo.CurrentCulture);
             var tickSize = graphics.MeasureString(tickText, font);
-            graphics.DrawString(tickText, font, textBrush, x - (tickSize.Width / 2F), bounds.Bottom + 2F);
+            graphics.DrawString(tickText, font, textBrush, Math.Max(0F, bounds.Left - tickSize.Width - 6F), y - (tickSize.Height / 2F));
         }
 
-        var rowHeight = Math.Max(18F, (bounds.Height - 12F) / Math.Max(1, values.Count));
+        var barWidth = Math.Max(12F, (bounds.Width - 16F) / Math.Max(1, values.Count) - 8F);
         for (var i = 0; i < values.Count; i++)
         {
             var value = values[i];
-            var y = bounds.Top + 6F + i * rowHeight;
-            var barLength = (float)(value.Value / maxValue) * (bounds.Width - 16F);
-            graphics.FillRectangle(barBrush, bounds.Left, y, barLength, Math.Max(10F, rowHeight - 6F));
+            var x = bounds.Left + 8F + i * (barWidth + 8F);
+            var barHeight = (float)(value.Value / maxValue) * (bounds.Height - 20F);
+            graphics.FillRectangle(barBrush, x, bounds.Bottom - barHeight, barWidth, barHeight);
 
             var label = value.Label;
             if (label.Length > 12)
@@ -866,10 +1041,11 @@ public partial class FortniteReplayAnalyzer
             }
 
             var labelSize = graphics.MeasureString(label, font);
-            graphics.DrawString(label, font, textBrush, bounds.Left - labelSize.Width - 6F, y + Math.Max(0F, (rowHeight - labelSize.Height) / 2F));
+            graphics.DrawString(label, font, textBrush, x + Math.Max(0F, (barWidth - labelSize.Width) / 2F), bounds.Bottom + 2F);
 
             var valueText = value.Value.ToString("0.#", CultureInfo.CurrentCulture);
-            graphics.DrawString(valueText, font, textBrush, Math.Min(bounds.Right - 38F, bounds.Left + barLength + 4F), y + Math.Max(0F, (rowHeight - labelSize.Height) / 2F));
+            var valueSize = graphics.MeasureString(valueText, font);
+            graphics.DrawString(valueText, font, textBrush, x + Math.Max(0F, (barWidth - valueSize.Width) / 2F), Math.Max(bounds.Top, bounds.Bottom - barHeight - valueSize.Height - 2F));
         }
     }
 }
