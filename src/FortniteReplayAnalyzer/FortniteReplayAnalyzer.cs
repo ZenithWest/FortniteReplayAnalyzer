@@ -63,6 +63,7 @@ public partial class FortniteReplayAnalyzer : Form
     private bool _suppressReplayTabSelection;
     private bool _isProcessingReplayQueue;
     private int _lastExpandedReplayPaneWidth = ExpandedReplayPaneWidth;
+    private readonly HashSet<DataGridView> _iconTextConfiguredGrids = [];
 
     private string ReplayFolder => string.IsNullOrWhiteSpace(_settings.DefaultReplaysFolder) ? DefaultReplayFolder : _settings.DefaultReplaysFolder;
 
@@ -74,6 +75,8 @@ public partial class FortniteReplayAnalyzer : Form
         InitializeDynamicUi();
         ApplySettingsToUi();
         WireEvents();
+        Shown += (_, _) => LayoutContentBelowMenu();
+        Resize += (_, _) => LayoutContentBelowMenu();
         DebugOutputWriter.LogInfo("Fortnite Replay Analyzer started.");
     }
 
@@ -83,7 +86,7 @@ public partial class FortniteReplayAnalyzer : Form
         InitializeMenuStrip();
         Size = new Size(1800, 900);
 
-        replayBrowserLayout.Padding = new Padding(0, 20, 0, 0);
+        replayBrowserLayout.Padding = new Padding(0, 6, 0, 0);
         splitMain.Panel1MinSize = CollapsedReplayPaneWidth;
         splitMain.SplitterWidth = 8;
         splitMain.BackColor = Color.FromArgb(184, 194, 208);
@@ -213,7 +216,8 @@ public partial class FortniteReplayAnalyzer : Form
         ConfigureReadOnlyGrid(_dgvPlayerDamageLog, fullRowSelect: true);
         _dgvPlayerDamageLog.AutoGenerateColumns = false;
         BuildCombatEventColumns(_dgvPlayerDamageLog);
-        _dgvPlayerDamageLog.CellContentClick += (_, e) => HandleCombatEventLinkClick(_dgvPlayerDamageLog, e);
+        EnsureIconTextRendering(_dgvPlayerDamageLog);
+        _dgvPlayerDamageLog.CellClick += (_, e) => HandleCombatEventLinkClick(_dgvPlayerDamageLog, e);
 
         var playerDamageLayout = new TableLayoutPanel
         {
@@ -275,12 +279,13 @@ public partial class FortniteReplayAnalyzer : Form
         };
         _openedReplayTabs.SelectedIndexChanged += async (_, _) => await HandleReplayTabSelectionChangedAsync();
 
-        splitMain.Panel2.Padding = new Padding(0, 25, 0, 0);
+        splitMain.Panel2.Padding = new Padding(0, 6, 0, 0);
         splitMain.Panel2.Controls.Clear();
         splitMain.Panel2.Controls.Add(_openedReplayTabs);
         splitMain.SplitterDistance = ExpandedReplayPaneWidth;
         UpdateReplayBrowserHeaderChrome();
         InitializeAdvancedAnalysisUi();
+        LayoutContentBelowMenu();
     }
 
     private void InitializeReplayBrowserContextMenu()
@@ -397,11 +402,11 @@ public partial class FortniteReplayAnalyzer : Form
         dgvReplayBrowser.CellMouseDown += HandleReplayBrowserCellMouseDown;
 
 
-        dgvKillFeed.CellContentClick += (_, e) => HandleKillFeedLinkClick(e);
-        dgvPlayerCombatLog.CellContentClick += (_, e) => HandleKillFeedLinkClick(dgvPlayerCombatLog, e);
-        dgvCombatEvents.CellContentClick += (_, e) => HandleCombatEventLinkClick(dgvCombatEvents, e);
-        dgvPlayers.CellContentClick += (_, e) => HandlePlayerLinkClick(e);
-        dgvPlayerVictims.CellContentClick += (_, e) => HandlePlayerVictimLinkClick(e);
+        dgvKillFeed.CellClick += (_, e) => HandleKillFeedLinkClick(e);
+        dgvPlayerCombatLog.CellClick += (_, e) => HandleKillFeedLinkClick(dgvPlayerCombatLog, e);
+        dgvCombatEvents.CellClick += (_, e) => HandleCombatEventLinkClick(dgvCombatEvents, e);
+        dgvPlayers.CellClick += (_, e) => HandlePlayerLinkClick(e);
+        dgvPlayerVictims.CellClick += (_, e) => HandlePlayerVictimLinkClick(e);
         dgvPlayers.SelectionChanged += (_, _) => HandlePlayerSelectionChanged();
         dgvPlayers.ColumnHeaderMouseClick += (_, e) => SortPlayerRows(dgvPlayers.Columns[e.ColumnIndex].Name);
     }
@@ -439,6 +444,11 @@ public partial class FortniteReplayAnalyzer : Form
         BuildGameStatsColumns(dgvPlayerOverview);
         BuildKillFeedColumns(dgvPlayerCombatLog);
         BuildPlayerVictimColumns();
+        EnsureIconTextRendering(dgvKillFeed);
+        EnsureIconTextRendering(dgvPlayerCombatLog);
+        EnsureIconTextRendering(dgvCombatEvents);
+        EnsureIconTextRendering(dgvPlayers);
+        EnsureIconTextRendering(dgvPlayerVictims);
     }
 
     private static void ConfigureReadOnlyGrid(DataGridView grid, bool fullRowSelect)
@@ -492,10 +502,9 @@ public partial class FortniteReplayAnalyzer : Form
     private static void BuildKillFeedColumns(DataGridView grid)
     {
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(KillFeedRow.TimeText), HeaderText = "Time", DataPropertyName = nameof(KillFeedRow.TimeText), FillWeight = 65 });
-        grid.Columns.Add(new DataGridViewImageColumn { Name = nameof(KillFeedRow.ActorIcon), HeaderText = "", DataPropertyName = nameof(KillFeedRow.ActorIcon), ImageLayout = DataGridViewImageCellLayout.Zoom, FillWeight = 42 });
-        grid.Columns.Add(new DataGridViewLinkColumn { Name = nameof(KillFeedRow.ActorName), HeaderText = "Actor", DataPropertyName = nameof(KillFeedRow.ActorName), FillWeight = 130, TrackVisitedState = false, UseColumnTextForLinkValue = false });
+        grid.Columns.Add(CreateIconNameColumn(nameof(KillFeedRow.ActorName), "Actor", nameof(KillFeedRow.ActorName), 150));
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(KillFeedRow.EventText), HeaderText = "Event", DataPropertyName = nameof(KillFeedRow.EventText), FillWeight = 85 });
-        grid.Columns.Add(new DataGridViewLinkColumn { Name = nameof(KillFeedRow.TargetName), HeaderText = "Target", DataPropertyName = nameof(KillFeedRow.TargetName), FillWeight = 130, TrackVisitedState = false, UseColumnTextForLinkValue = false });
+        grid.Columns.Add(CreateIconNameColumn(nameof(KillFeedRow.TargetName), "Target", nameof(KillFeedRow.TargetName), 150));
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(KillFeedRow.DistanceText), HeaderText = "Distance", DataPropertyName = nameof(KillFeedRow.DistanceText), FillWeight = 70 });
         grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
     }
@@ -503,8 +512,8 @@ public partial class FortniteReplayAnalyzer : Form
     private static void BuildCombatEventColumns(DataGridView grid)
     {
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.TimeText), HeaderText = "Time", DataPropertyName = nameof(CombatEventRow.TimeText), FillWeight = 62 });
-        grid.Columns.Add(new DataGridViewLinkColumn { Name = nameof(CombatEventRow.AttackerName), HeaderText = "Attacker", DataPropertyName = nameof(CombatEventRow.AttackerName), FillWeight = 130, TrackVisitedState = false, UseColumnTextForLinkValue = false });
-        grid.Columns.Add(new DataGridViewLinkColumn { Name = nameof(CombatEventRow.TargetName), HeaderText = "Target", DataPropertyName = nameof(CombatEventRow.TargetName), FillWeight = 130, TrackVisitedState = false, UseColumnTextForLinkValue = false });
+        grid.Columns.Add(CreateIconNameColumn(nameof(CombatEventRow.AttackerName), "Attacker", nameof(CombatEventRow.AttackerName), 150));
+        grid.Columns.Add(CreateIconNameColumn(nameof(CombatEventRow.TargetName), "Target", nameof(CombatEventRow.TargetName), 150));
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.DamageText), HeaderText = "Damage", DataPropertyName = nameof(CombatEventRow.DamageText), FillWeight = 72 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.WeaponTypeText), HeaderText = "Weapon", DataPropertyName = nameof(CombatEventRow.WeaponTypeText), FillWeight = 88 });
         grid.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(CombatEventRow.ShieldText), HeaderText = "Shield", DataPropertyName = nameof(CombatEventRow.ShieldText), FillWeight = 62 });
@@ -516,7 +525,7 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void BuildPlayerColumns()
     {
-        dgvPlayers.Columns.Add(new DataGridViewLinkColumn { Name = nameof(PlayerSummaryRow.DisplayName), HeaderText = "Player", DataPropertyName = nameof(PlayerSummaryRow.DisplayName), FillWeight = 170, TrackVisitedState = false, UseColumnTextForLinkValue = false });
+        dgvPlayers.Columns.Add(CreateIconNameColumn(nameof(PlayerSummaryRow.DisplayName), "Player", nameof(PlayerSummaryRow.DisplayName), 170));
         dgvPlayers.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerSummaryRow.TeamText), HeaderText = "Team", DataPropertyName = nameof(PlayerSummaryRow.TeamText), FillWeight = 55 });
         dgvPlayers.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerSummaryRow.PlacementText), HeaderText = "Place", DataPropertyName = nameof(PlayerSummaryRow.PlacementText), FillWeight = 55 });
         dgvPlayers.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerSummaryRow.KillsText), HeaderText = "Kills", DataPropertyName = nameof(PlayerSummaryRow.KillsText), FillWeight = 55 });
@@ -526,7 +535,7 @@ public partial class FortniteReplayAnalyzer : Form
     }
     private void BuildPlayerVictimColumns()
     {
-        dgvPlayerVictims.Columns.Add(new DataGridViewLinkColumn { Name = nameof(PlayerVictimRow.PlayerName), HeaderText = "Player", DataPropertyName = nameof(PlayerVictimRow.PlayerName), FillWeight = 150, TrackVisitedState = false, UseColumnTextForLinkValue = false });
+        dgvPlayerVictims.Columns.Add(CreateIconNameColumn(nameof(PlayerVictimRow.PlayerName), "Player", nameof(PlayerVictimRow.PlayerName), 150));
         dgvPlayerVictims.Columns.Add(new DataGridViewCheckBoxColumn { Name = nameof(PlayerVictimRow.IsBot), HeaderText = "Bot", DataPropertyName = nameof(PlayerVictimRow.IsBot), FillWeight = 45 });
         dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.EventText), HeaderText = "Event", DataPropertyName = nameof(PlayerVictimRow.EventText), FillWeight = 80 });
         dgvPlayerVictims.Columns.Add(new DataGridViewTextBoxColumn { Name = nameof(PlayerVictimRow.TimeText), HeaderText = "Time", DataPropertyName = nameof(PlayerVictimRow.TimeText), FillWeight = 70 });
@@ -865,6 +874,7 @@ public partial class FortniteReplayAnalyzer : Form
             ActorName = ResolvePlayerName(actorReference.Player, actorReference.NumericId, actorReference.LookupKey),
             ActorId = actorReference.NumericId,
             ActorLookupKey = actorReference.LookupKey,
+            TargetIcon = GetPlayerSkinIcon(targetPlayer),
             TargetName = ResolvePlayerName(targetPlayer, entry.PlayerId, entry.PlayerName),
             TargetId = targetPlayer?.Id ?? entry.PlayerId,
             TargetLookupKey = targetPlayer?.PlayerId ?? entry.PlayerName,
@@ -883,9 +893,11 @@ public partial class FortniteReplayAnalyzer : Form
         {
             TimeValue = timeValue,
             TimeText = FormatMatchClock(timeValue),
+            AttackerIcon = GetPlayerSkinIcon(attacker),
             AttackerName = ResolveCombatantName(attacker, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot),
             AttackerId = attacker?.Id ?? evt.InstigatorId,
             AttackerLookupKey = attacker?.PlayerId ?? evt.InstigatorName,
+            TargetIcon = GetPlayerSkinIcon(target),
             TargetName = ResolveCombatantName(target, evt.TargetId, evt.TargetName, evt.TargetIsBot),
             TargetId = target?.Id ?? evt.TargetId,
             TargetLookupKey = target?.PlayerId ?? evt.TargetName,
@@ -901,6 +913,11 @@ public partial class FortniteReplayAnalyzer : Form
 
     private Image? GetPlayerSkinIcon(PlayerData? player)
     {
+        if (player is null)
+        {
+            return null;
+        }
+
         var cosmeticId = player?.Cosmetics?.Character;
         if (string.IsNullOrWhiteSpace(cosmeticId))
         {
@@ -922,6 +939,7 @@ public partial class FortniteReplayAnalyzer : Form
         _playerRows.AddRange(replay.PlayerData.Select(player => new PlayerSummaryRow
         {
             Player = player,
+            ProfileIcon = GetPlayerSkinIcon(player),
             DisplayName = ResolvePlayerName(player, player.Id, player.PlayerId),
             Team = player.TeamIndex,
             TeamText = FormatNullable(player.TeamIndex),
@@ -1110,6 +1128,7 @@ public partial class FortniteReplayAnalyzer : Form
                 var victim = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
                 return new PlayerVictimRow
                 {
+                    PlayerIcon = GetPlayerSkinIcon(victim),
                     PlayerName = ResolvePlayerName(victim, entry.PlayerId, entry.PlayerName),
                     PlayerId = entry.PlayerId,
                     PlayerLookupKey = victim?.PlayerId ?? entry.PlayerName,
@@ -1298,6 +1317,89 @@ public partial class FortniteReplayAnalyzer : Form
         _lblReplayHideHint.Location = new Point(lblReplayHeader.Right + 8, lblReplayHeader.Top + 5);
         lblReplayStatus.Location = new Point(12, 42);
         lblReplayStatus.Size = new Size(replayBrowserHeader.ClientSize.Width - 24, 22);
+    }
+
+    private static DataGridViewTextBoxColumn CreateIconNameColumn(string name, string headerText, string dataPropertyName, float fillWeight)
+    {
+        return new DataGridViewTextBoxColumn
+        {
+            Name = name,
+            HeaderText = headerText,
+            DataPropertyName = dataPropertyName,
+            FillWeight = fillWeight,
+            DefaultCellStyle = new DataGridViewCellStyle
+            {
+                ForeColor = Color.RoyalBlue,
+                SelectionForeColor = Color.White,
+                Padding = new Padding(24, 0, 0, 0)
+            }
+        };
+    }
+
+    private void EnsureIconTextRendering(DataGridView grid)
+    {
+        if (!_iconTextConfiguredGrids.Add(grid))
+        {
+            return;
+        }
+
+        grid.CellPainting += HandleIconTextCellPainting;
+        grid.CellMouseMove += HandleIconTextCellMouseMove;
+        grid.CellMouseLeave += (_, _) => grid.Cursor = Cursors.Default;
+    }
+
+    private void HandleIconTextCellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
+    {
+        if (sender is not DataGridView grid || e.RowIndex < 0 || e.ColumnIndex < 0)
+        {
+            return;
+        }
+
+        if (!TryGetGridCellIcon(grid.Rows[e.RowIndex].DataBoundItem, grid.Columns[e.ColumnIndex].Name, out var icon) || icon is null)
+        {
+            return;
+        }
+
+        e.Paint(e.CellBounds, e.PaintParts);
+        var iconBounds = new Rectangle(e.CellBounds.Left + 4, e.CellBounds.Top + ((e.CellBounds.Height - 16) / 2), 16, 16);
+        e.Graphics.DrawImage(icon, iconBounds);
+        e.Handled = true;
+    }
+
+    private void HandleIconTextCellMouseMove(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (sender is not DataGridView grid || e.RowIndex < 0 || e.ColumnIndex < 0)
+        {
+            return;
+        }
+
+        grid.Cursor = IsClickableNameColumn(grid.Columns[e.ColumnIndex].Name) ? Cursors.Hand : Cursors.Default;
+    }
+
+    private static bool TryGetGridCellIcon(object? rowItem, string columnName, out Image? icon)
+    {
+        icon = rowItem switch
+        {
+            KillFeedRow killFeedRow when columnName == nameof(KillFeedRow.ActorName) => killFeedRow.ActorIcon,
+            KillFeedRow killFeedRow when columnName == nameof(KillFeedRow.TargetName) => killFeedRow.TargetIcon,
+            CombatEventRow combatEventRow when columnName == nameof(CombatEventRow.AttackerName) => combatEventRow.AttackerIcon,
+            CombatEventRow combatEventRow when columnName == nameof(CombatEventRow.TargetName) => combatEventRow.TargetIcon,
+            PlayerSummaryRow playerRow when columnName == nameof(PlayerSummaryRow.DisplayName) => playerRow.ProfileIcon,
+            PlayerVictimRow victimRow when columnName == nameof(PlayerVictimRow.PlayerName) => victimRow.PlayerIcon,
+            _ => null
+        };
+
+        return icon is not null;
+    }
+
+    private static bool IsClickableNameColumn(string columnName)
+    {
+        return columnName is nameof(KillFeedRow.ActorName)
+            or nameof(KillFeedRow.TargetName)
+            or nameof(CombatEventRow.AttackerName)
+            or nameof(CombatEventRow.TargetName)
+            or nameof(PlayerSummaryRow.DisplayName)
+            or nameof(PlayerVictimRow.PlayerName);
     }
     private static PlayerData? GetReplayOwner(FortniteReplay replay) => replay.PlayerData?.FirstOrDefault(player => player.IsReplayOwner);
 

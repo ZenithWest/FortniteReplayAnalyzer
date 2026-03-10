@@ -13,11 +13,15 @@ public partial class FortniteReplayAnalyzer
     private DateTimePicker? _dtWeaponTo;
     private Label? _lblWeaponStatsStatus;
     private DataGridView? _dgvWeaponStats;
+    private Button? _btnWeaponStatsStop;
+    private CancellationTokenSource? _weaponStatsLoadCts;
     private ComboBox? _cmbOverallRange;
     private DateTimePicker? _dtOverallFrom;
     private DateTimePicker? _dtOverallTo;
     private Label? _lblOverallStatsStatus;
     private DataGridView? _dgvOverallStats;
+    private Button? _btnOverallStatsStop;
+    private CancellationTokenSource? _overallStatsLoadCts;
     private Panel? _damageTimelinePanel;
     private CheckBox? _chkTimelinePlayers;
     private CheckBox? _chkTimelineBots;
@@ -74,6 +78,8 @@ public partial class FortniteReplayAnalyzer
 
         var btnRefresh = new Button { Text = "Refresh", AutoSize = true };
         btnRefresh.Click += async (_, _) => await RefreshWeaponStatsPageAsync();
+        _btnWeaponStatsStop = new Button { Text = "Stop", AutoSize = true, Enabled = false };
+        _btnWeaponStatsStop.Click += (_, _) => _weaponStatsLoadCts?.Cancel();
 
         filters.Controls.Add(new Label { AutoSize = true, Margin = new Padding(0, 6, 8, 0), Text = "Range" });
         filters.Controls.Add(_cmbWeaponRange);
@@ -82,6 +88,7 @@ public partial class FortniteReplayAnalyzer
         filters.Controls.Add(new Label { AutoSize = true, Margin = new Padding(8, 6, 8, 0), Text = "To" });
         filters.Controls.Add(_dtWeaponTo);
         filters.Controls.Add(btnRefresh);
+        filters.Controls.Add(_btnWeaponStatsStop);
 
         _lblWeaponStatsStatus = new Label
         {
@@ -137,6 +144,8 @@ public partial class FortniteReplayAnalyzer
 
         var btnRefresh = new Button { Text = "Refresh", AutoSize = true };
         btnRefresh.Click += async (_, _) => await RefreshOverallStatsPageAsync();
+        _btnOverallStatsStop = new Button { Text = "Stop", AutoSize = true, Enabled = false };
+        _btnOverallStatsStop.Click += (_, _) => _overallStatsLoadCts?.Cancel();
 
         filters.Controls.Add(new Label { AutoSize = true, Margin = new Padding(0, 6, 8, 0), Text = "Range" });
         filters.Controls.Add(_cmbOverallRange);
@@ -145,6 +154,7 @@ public partial class FortniteReplayAnalyzer
         filters.Controls.Add(new Label { AutoSize = true, Margin = new Padding(8, 6, 8, 0), Text = "To" });
         filters.Controls.Add(_dtOverallTo);
         filters.Controls.Add(btnRefresh);
+        filters.Controls.Add(_btnOverallStatsStop);
 
         _lblOverallStatsStatus = new Label
         {
@@ -212,37 +222,56 @@ public partial class FortniteReplayAnalyzer
         }
 
         ToggleAggregateDatePickers(_cmbWeaponRange, _dtWeaponFrom, _dtWeaponTo);
-        _lblWeaponStatsStatus.Text = "Loading weapon stats...";
+        _weaponStatsLoadCts?.Cancel();
+        _weaponStatsLoadCts = new CancellationTokenSource();
+        var cancellationToken = _weaponStatsLoadCts.Token;
+        _lblWeaponStatsStatus.Text = "Building weapon stats from already-loaded replays...";
+        if (_btnWeaponStatsStop is not null) _btnWeaponStatsStop.Enabled = true;
 
-        var rows = await GetAggregateReplayRowsAsync(_cmbWeaponRange, _dtWeaponFrom, _dtWeaponTo);
-        var weaponRows = rows
-            .SelectMany(BuildWeaponStatsRowsForReplay)
-            .GroupBy(row => new { row.WeaponType, row.WeaponName })
-            .Select(group =>
+        try
+        {
+            var rows = await GetAggregateReplayRowsAsync(_cmbWeaponRange, _dtWeaponFrom, _dtWeaponTo, cancellationToken);
+            var weaponRows = await Task.Run(() =>
             {
-                var hits = group.Sum(x => x.Hits);
-                var crits = group.Sum(x => x.CriticalHits);
-                var damage = group.Sum(x => x.TotalDamage);
-                return new WeaponStatsRow
-                {
-                    WeaponType = group.Key.WeaponType,
-                    WeaponName = group.Key.WeaponName,
-                    Hits = hits,
-                    CriticalHits = crits,
-                    FatalHits = group.Sum(x => x.FatalHits),
-                    TotalDamage = damage,
-                    AvgDamage = hits == 0 ? 0F : damage / hits,
-                    CriticalRate = hits == 0 ? 0F : (float)crits / hits * 100F
-                };
-            })
-            .OrderByDescending(row => row.TotalDamage)
-            .ThenBy(row => row.WeaponType)
-            .ToList();
+                cancellationToken.ThrowIfCancellationRequested();
+                return rows
+                    .SelectMany(BuildWeaponStatsRowsForReplay)
+                    .GroupBy(row => new { row.WeaponType, row.WeaponName })
+                    .Select(group =>
+                    {
+                        var hits = group.Sum(x => x.Hits);
+                        var crits = group.Sum(x => x.CriticalHits);
+                        var damage = group.Sum(x => x.TotalDamage);
+                        return new WeaponStatsRow
+                        {
+                            WeaponType = group.Key.WeaponType,
+                            WeaponName = group.Key.WeaponName,
+                            Hits = hits,
+                            CriticalHits = crits,
+                            FatalHits = group.Sum(x => x.FatalHits),
+                            TotalDamage = damage,
+                            AvgDamage = hits == 0 ? 0F : damage / hits,
+                            CriticalRate = hits == 0 ? 0F : (float)crits / hits * 100F
+                        };
+                    })
+                    .OrderByDescending(row => row.TotalDamage)
+                    .ThenBy(row => row.WeaponType)
+                    .ToList();
+            }, cancellationToken);
 
-        _dgvWeaponStats.DataSource = weaponRows;
-        _lblWeaponStatsStatus.Text = rows.Count == 0
-            ? "No replays in range."
-            : $"Weapon stats built from {rows.Count} replay(s).";
+            _dgvWeaponStats.DataSource = weaponRows;
+            _lblWeaponStatsStatus.Text = rows.Count == 0
+                ? "No loaded replays in range."
+                : $"Weapon stats built from {rows.Count} loaded replay(s).";
+        }
+        catch (OperationCanceledException)
+        {
+            _lblWeaponStatsStatus.Text = "Weapon stats refresh stopped.";
+        }
+        finally
+        {
+            if (_btnWeaponStatsStop is not null) _btnWeaponStatsStop.Enabled = false;
+        }
     }
 
     private async Task RefreshOverallStatsPageAsync()
@@ -253,29 +282,45 @@ public partial class FortniteReplayAnalyzer
         }
 
         ToggleAggregateDatePickers(_cmbOverallRange, _dtOverallFrom, _dtOverallTo);
-        _lblOverallStatsStatus.Text = "Loading overall statistics...";
+        _overallStatsLoadCts?.Cancel();
+        _overallStatsLoadCts = new CancellationTokenSource();
+        var cancellationToken = _overallStatsLoadCts.Token;
+        _lblOverallStatsStatus.Text = "Building overall statistics from already-loaded replays...";
+        if (_btnOverallStatsStop is not null) _btnOverallStatsStop.Enabled = true;
 
-        var rows = await GetAggregateReplayRowsAsync(_cmbOverallRange, _dtOverallFrom, _dtOverallTo);
-        var detailRows = BuildOverallStatisticsRows(rows).ToList();
-        _dgvOverallStats.DataSource = detailRows;
-        _lblOverallStatsStatus.Text = rows.Count == 0
-            ? "No replays in range."
-            : $"Overall statistics built from {rows.Count} replay(s).";
+        try
+        {
+            var rows = await GetAggregateReplayRowsAsync(_cmbOverallRange, _dtOverallFrom, _dtOverallTo, cancellationToken);
+            var detailRows = await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return BuildOverallStatisticsRows(rows).ToList();
+            }, cancellationToken);
+
+            _dgvOverallStats.DataSource = detailRows;
+            _lblOverallStatsStatus.Text = rows.Count == 0
+                ? "No loaded replays in range."
+                : $"Overall statistics built from {rows.Count} loaded replay(s).";
+        }
+        catch (OperationCanceledException)
+        {
+            _lblOverallStatsStatus.Text = "Overall statistics refresh stopped.";
+        }
+        finally
+        {
+            if (_btnOverallStatsStop is not null) _btnOverallStatsStop.Enabled = false;
+        }
     }
 
-    private async Task<List<ReplayBrowserRow>> GetAggregateReplayRowsAsync(ComboBox? rangeCombo, DateTimePicker? fromPicker, DateTimePicker? toPicker)
+    private Task<List<ReplayBrowserRow>> GetAggregateReplayRowsAsync(ComboBox? rangeCombo, DateTimePicker? fromPicker, DateTimePicker? toPicker, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var filtered = _replayRows
             .Where(row => IsReplayInAggregateRange(row, GetSelectedRange(rangeCombo), fromPicker, toPicker))
+            .Where(row => row.Replay is not null)
             .OrderByDescending(row => row.RecordedAt)
             .ToList();
-
-        foreach (var row in filtered.Where(row => row.Replay is null || row.LoadedParseMode < ParseMode.Full))
-        {
-            await EnsureReplayLoadedAsync(row, ParseMode.Full, updateSelectionView: false);
-        }
-
-        return filtered.Where(row => row.Replay is not null).ToList();
+        return Task.FromResult(filtered);
     }
 
     private static AggregateRangeOption GetSelectedRange(ComboBox? comboBox) => comboBox?.SelectedIndex switch

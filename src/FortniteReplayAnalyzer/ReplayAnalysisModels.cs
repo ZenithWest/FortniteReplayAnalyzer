@@ -45,6 +45,7 @@ internal sealed class ReplayBrowserRow
 internal sealed class PlayerSummaryRow
 {
     public required PlayerData Player { get; init; }
+    public Image? ProfileIcon { get; init; }
     public required string DisplayName { get; init; }
     public int? Team { get; init; }
     public required string TeamText { get; init; }
@@ -66,6 +67,7 @@ internal sealed class KillFeedRow
     public int? ActorId { get; init; }
     public string? ActorLookupKey { get; init; }
     public required string EventText { get; init; }
+    public Image? TargetIcon { get; init; }
     public required string TargetName { get; init; }
     public int? TargetId { get; init; }
     public string? TargetLookupKey { get; init; }
@@ -76,9 +78,11 @@ internal sealed class CombatEventRow
 {
     public required double TimeValue { get; init; }
     public required string TimeText { get; init; }
+    public Image? AttackerIcon { get; init; }
     public required string AttackerName { get; init; }
     public int? AttackerId { get; init; }
     public string? AttackerLookupKey { get; init; }
+    public Image? TargetIcon { get; init; }
     public required string TargetName { get; init; }
     public int? TargetId { get; init; }
     public string? TargetLookupKey { get; init; }
@@ -105,6 +109,7 @@ internal sealed class DetailRow
 
 internal sealed class PlayerVictimRow
 {
+    public Image? PlayerIcon { get; init; }
     public required string PlayerName { get; init; }
     public int? PlayerId { get; init; }
     public string? PlayerLookupKey { get; init; }
