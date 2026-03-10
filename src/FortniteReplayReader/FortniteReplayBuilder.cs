@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace FortniteReplayReader;
 
@@ -478,7 +479,10 @@ public class FortniteReplayBuilder
         newWeapon.B ??= weapon.B;
         newWeapon.C ??= weapon.C;
         newWeapon.D ??= weapon.D;
-        newWeapon.WeaponName ??= weapon.WeaponData?.Name;
+        newWeapon.WeaponAssetName ??= weapon.WeaponData?.Name;
+        newWeapon.WeaponClassName ??= weapon.GetType().Name;
+        newWeapon.WeaponName ??= GetWeaponDisplayName(weapon.WeaponData?.Name, weapon.GetType().Name);
+        newWeapon.WeaponType ??= NormalizeWeaponType(newWeapon.WeaponAssetName, newWeapon.WeaponClassName, newWeapon.WeaponName);
     }
 
     public void UpdateSafeZones(SafeZoneIndicator safeZone)
@@ -628,7 +632,7 @@ public class FortniteReplayBuilder
             return;
         }
 
-        var weaponName = ResolveWeaponName(instigator);
+        var weapon = ResolveWeapon(instigator);
 
         DamageEvents.Add(new DamageEvent
         {
@@ -643,8 +647,10 @@ public class FortniteReplayBuilder
             ReplicatedWorldTimeSeconds = ReplicatedWorldTimeSeconds,
             ReplicatedWorldTimeSecondsDouble = ReplicatedWorldTimeSecondsDouble,
             Magnitude = magnitude,
-            WeaponName = weaponName,
-            WeaponType = NormalizeWeaponType(weaponName),
+            WeaponName = weapon?.WeaponName,
+            WeaponType = weapon?.WeaponType,
+            WeaponAssetName = weapon?.WeaponAssetName,
+            WeaponClassName = weapon?.WeaponClassName,
             Location = location,
             Normal = normal,
             TraceStart = effectContext?.HitResult?.TraceStart,
@@ -687,7 +693,7 @@ public class FortniteReplayBuilder
             TryGetPlayerDataFromActor(targetActor.Value, out target);
         }
 
-        var weaponName = ResolveWeaponName(instigator);
+        var weapon = ResolveWeapon(instigator);
 
         DamageEvents.Add(new DamageEvent
         {
@@ -707,14 +713,16 @@ public class FortniteReplayBuilder
             IsShieldDestroyed = damageCues.bIsShieldDestroyed,
             IsShieldApplied = damageCues.bIsShieldApplied,
             IsBallistic = damageCues.bIsBallistic,
-            WeaponName = weaponName,
-            WeaponType = NormalizeWeaponType(weaponName),
+            WeaponName = weapon?.WeaponName,
+            WeaponType = weapon?.WeaponType,
+            WeaponAssetName = weapon?.WeaponAssetName,
+            WeaponClassName = weapon?.WeaponClassName,
             Location = damageCues.Location ?? damageCues.NonPlayerLocation,
             Normal = damageCues.Normal ?? damageCues.NonPlayerNormal
         });
     }
 
-    private string? ResolveWeaponName(PlayerData? player)
+    private WeaponData? ResolveWeapon(PlayerData? player)
     {
         if (player?.CurrentWeapon is not uint weaponChannel)
         {
@@ -723,35 +731,93 @@ public class FortniteReplayBuilder
 
         if (_weapons.TryGetValue(weaponChannel, out var weapon))
         {
-            return weapon.WeaponName;
+            return weapon;
         }
 
         if (_unknownWeapons.TryGetValue(weaponChannel, out var unknownWeapon))
         {
-            return unknownWeapon.WeaponName;
+            return unknownWeapon;
         }
 
         return null;
     }
 
-    private static string NormalizeWeaponType(string? weaponName)
+    private static string NormalizeWeaponType(string? weaponAssetName, string? weaponClassName, string? weaponDisplayName)
     {
-        if (string.IsNullOrWhiteSpace(weaponName))
+        var normalized = NormalizeLookupValue(weaponAssetName);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            normalized = NormalizeLookupValue(weaponClassName);
+        }
+
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            normalized = NormalizeLookupValue(weaponDisplayName);
+        }
+
+        if (string.IsNullOrWhiteSpace(normalized))
         {
             return "Unknown";
         }
 
-        var normalized = weaponName.Replace("_", " ", StringComparison.OrdinalIgnoreCase);
-
         if (normalized.Contains("shotgun", StringComparison.OrdinalIgnoreCase)) return "Shotgun";
         if (normalized.Contains("assault", StringComparison.OrdinalIgnoreCase) || normalized.Contains("rifle", StringComparison.OrdinalIgnoreCase)) return "Rifle";
-        if (normalized.Contains("smg", StringComparison.OrdinalIgnoreCase) || normalized.Contains("submachine", StringComparison.OrdinalIgnoreCase)) return "SMG";
+        if (normalized.Contains("smg", StringComparison.OrdinalIgnoreCase) || normalized.Contains("submachine", StringComparison.OrdinalIgnoreCase) || normalized.Contains("pdw", StringComparison.OrdinalIgnoreCase)) return "SMG";
         if (normalized.Contains("pistol", StringComparison.OrdinalIgnoreCase) || normalized.Contains("revolver", StringComparison.OrdinalIgnoreCase)) return "Pistol";
         if (normalized.Contains("sniper", StringComparison.OrdinalIgnoreCase) || normalized.Contains("dmr", StringComparison.OrdinalIgnoreCase)) return "Marksman";
         if (normalized.Contains("rocket", StringComparison.OrdinalIgnoreCase) || normalized.Contains("grenade", StringComparison.OrdinalIgnoreCase) || normalized.Contains("launcher", StringComparison.OrdinalIgnoreCase)) return "Explosive";
-        if (normalized.Contains("pickaxe", StringComparison.OrdinalIgnoreCase) || normalized.Contains("harvesting", StringComparison.OrdinalIgnoreCase)) return "Melee";
+        if (normalized.Contains("pickaxe", StringComparison.OrdinalIgnoreCase) || normalized.Contains("harvesting", StringComparison.OrdinalIgnoreCase) || normalized.Contains("melee", StringComparison.OrdinalIgnoreCase)) return "Melee";
+        if (normalized.Contains("crossbow", StringComparison.OrdinalIgnoreCase) || normalized.Contains("bow", StringComparison.OrdinalIgnoreCase)) return "Bow";
+        if (normalized.Contains("trap", StringComparison.OrdinalIgnoreCase)) return "Trap";
+        if (normalized.Contains("fishing", StringComparison.OrdinalIgnoreCase) || normalized.Contains("harpoon", StringComparison.OrdinalIgnoreCase)) return "Utility";
 
         return "Other";
+    }
+
+    private static string? GetWeaponDisplayName(string? weaponAssetName, string? weaponClassName)
+    {
+        var cleanedAssetName = CleanWeaponIdentifier(weaponAssetName);
+        if (!string.IsNullOrWhiteSpace(cleanedAssetName))
+        {
+            return cleanedAssetName;
+        }
+
+        var cleanedClassName = CleanWeaponIdentifier(weaponClassName);
+        return string.IsNullOrWhiteSpace(cleanedClassName) ? null : cleanedClassName;
+    }
+
+    private static string? CleanWeaponIdentifier(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var identifier = value.Trim();
+        var slashIndex = identifier.LastIndexOf('/');
+        if (slashIndex >= 0 && slashIndex < identifier.Length - 1)
+        {
+            identifier = identifier[(slashIndex + 1)..];
+        }
+
+        var dotIndex = identifier.LastIndexOf('.');
+        if (dotIndex >= 0 && dotIndex < identifier.Length - 1)
+        {
+            identifier = identifier[(dotIndex + 1)..];
+        }
+
+        identifier = Regex.Replace(identifier, @"^(WID|B_WID|Athena|FortWeapon|Weapon|Fort|TID)_", string.Empty, RegexOptions.IgnoreCase);
+        identifier = Regex.Replace(identifier, @"(?<!^)([A-Z])", " $1");
+        identifier = identifier.Replace('_', ' ');
+        identifier = Regex.Replace(identifier, @"\s+", " ").Trim();
+
+        return string.IsNullOrWhiteSpace(identifier) ? null : identifier;
+    }
+
+    private static string? NormalizeLookupValue(string? value)
+    {
+        var cleaned = CleanWeaponIdentifier(value);
+        return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
     }
 }
 

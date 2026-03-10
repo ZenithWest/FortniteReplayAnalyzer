@@ -364,8 +364,8 @@ public partial class FortniteReplayAnalyzer
                      .Where(evt => IsDamageByPlayer(owner, evt))
                      .GroupBy(evt => new
                      {
-                         WeaponType = string.IsNullOrWhiteSpace(evt.WeaponType) ? "Unknown" : evt.WeaponType!,
-                         WeaponName = string.IsNullOrWhiteSpace(evt.WeaponName) ? "Unknown" : evt.WeaponName!
+                         WeaponType = GetWeaponStatsTypeLabel(evt),
+                         WeaponName = GetWeaponStatsNameLabel(evt)
                      }))
         {
             var hits = group.Count();
@@ -383,6 +383,46 @@ public partial class FortniteReplayAnalyzer
                 CriticalRate = hits == 0 ? 0F : (float)crits / hits * 100F
             };
         }
+    }
+
+    private static string GetWeaponStatsTypeLabel(DamageEvent evt)
+    {
+        if (!string.IsNullOrWhiteSpace(evt.WeaponType) && !string.Equals(evt.WeaponType, "Unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            return evt.WeaponType!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.WeaponClassName))
+        {
+            return evt.WeaponClassName!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.WeaponAssetName))
+        {
+            return evt.WeaponAssetName!;
+        }
+
+        return "Unknown";
+    }
+
+    private static string GetWeaponStatsNameLabel(DamageEvent evt)
+    {
+        if (!string.IsNullOrWhiteSpace(evt.WeaponName) && !string.Equals(evt.WeaponName, "Unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            return evt.WeaponName!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.WeaponAssetName))
+        {
+            return evt.WeaponAssetName!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.WeaponClassName))
+        {
+            return evt.WeaponClassName!;
+        }
+
+        return "Unknown";
     }
 
     private IEnumerable<DetailRow> BuildOverallStatisticsRows(IEnumerable<ReplayBrowserRow> rows)

@@ -23,6 +23,8 @@ public class DamageEvent
     public bool? IsBallistic { get; set; }
     public string? WeaponName { get; set; }
     public string? WeaponType { get; set; }
+    public string? WeaponAssetName { get; set; }
+    public string? WeaponClassName { get; set; }
     public FVector? Location { get; set; }
     public FVector? Normal { get; set; }
     public FVector? TraceStart { get; set; }

@@ -1495,14 +1495,24 @@ public partial class FortniteReplayAnalyzer : Form
 
     private static string FormatWeaponType(DamageEvent evt)
     {
-        if (!string.IsNullOrWhiteSpace(evt.WeaponType))
+        if (!string.IsNullOrWhiteSpace(evt.WeaponType) && !string.Equals(evt.WeaponType, "Unknown", StringComparison.OrdinalIgnoreCase))
         {
             return evt.WeaponType!;
         }
 
-        if (!string.IsNullOrWhiteSpace(evt.WeaponName))
+        if (!string.IsNullOrWhiteSpace(evt.WeaponName) && !string.Equals(evt.WeaponName, "Unknown", StringComparison.OrdinalIgnoreCase))
         {
             return evt.WeaponName!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.WeaponClassName))
+        {
+            return evt.WeaponClassName!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.WeaponAssetName))
+        {
+            return evt.WeaponAssetName!;
         }
 
         return "-";
