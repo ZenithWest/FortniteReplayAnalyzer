@@ -23,7 +23,8 @@ public partial class FortniteReplayAnalyzer
     private Button? _btnOverallStatsStop;
     private CancellationTokenSource? _overallStatsLoadCts;
     private Panel? _damageTimelinePanel;
-    private Panel? _overallTrendsPanel;
+    private Panel? _overallDamageTrendPanel;
+    private Panel? _overallKillsTrendPanel;
     private CheckBox? _chkTimelinePlayers;
     private CheckBox? _chkTimelineBots;
     private CheckBox? _chkTimelineTeam;
@@ -173,18 +174,60 @@ public partial class FortniteReplayAnalyzer
         _dgvOverallStats.AutoGenerateColumns = false;
         BuildGameStatsColumns(_dgvOverallStats);
 
-        _overallTrendsPanel = new Panel
+        _overallDamageTrendPanel = new Panel
         {
             Dock = DockStyle.Fill,
-            Height = 240,
             BackColor = Color.White
         };
-        _overallTrendsPanel.Paint += (_, e) => PaintOverallTrends(e.Graphics, _overallTrendsPanel.ClientRectangle);
+        _overallDamageTrendPanel.Paint += (_, e) => PaintOverallTrendChart(
+            e.Graphics,
+            _overallDamageTrendPanel.ClientRectangle,
+            "Damage Per Match",
+            _overallTrendRows.Select(row => ((double)row.DamageToPlayersAndBots, row.Label)).ToList(),
+            Color.FromArgb(52, 123, 220));
+
+        _overallKillsTrendPanel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Color.White
+        };
+        _overallKillsTrendPanel.Paint += (_, e) => PaintOverallTrendChart(
+            e.Graphics,
+            _overallKillsTrendPanel.ClientRectangle,
+            "Kills Per Match",
+            _overallTrendRows.Select(row => ((double)row.Kills, row.Label)).ToList(),
+            Color.FromArgb(244, 124, 32));
+
+        var content = new TableLayoutPanel
+        {
+            ColumnCount = 2,
+            Dock = DockStyle.Fill,
+            Margin = new Padding(0, 8, 0, 0),
+            RowCount = 1
+        };
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56F));
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44F));
+        content.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+        var graphsHost = new TableLayoutPanel
+        {
+            ColumnCount = 1,
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            RowCount = 2
+        };
+        graphsHost.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        graphsHost.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
+        graphsHost.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
+        graphsHost.Controls.Add(_overallDamageTrendPanel, 0, 0);
+        graphsHost.Controls.Add(_overallKillsTrendPanel, 0, 1);
+
+        content.Controls.Add(graphsHost, 0, 0);
+        content.Controls.Add(_dgvOverallStats, 1, 0);
 
         page.Controls.Add(filters, 0, 0);
         page.Controls.Add(_lblOverallStatsStatus, 0, 1);
-        page.Controls.Add(_overallTrendsPanel, 0, 2);
-        page.Controls.Add(_dgvOverallStats, 0, 3);
+        page.Controls.Add(content, 0, 2);
         return page;
     }
 
@@ -314,7 +357,8 @@ public partial class FortniteReplayAnalyzer
 
             _dgvOverallStats.DataSource = detailRows;
             _overallTrendRows = BuildOverallTrendRows(rows).ToList();
-            _overallTrendsPanel?.Invalidate();
+            _overallDamageTrendPanel?.Invalidate();
+            _overallKillsTrendPanel?.Invalidate();
             _lblOverallStatsStatus.Text = rows.Count == 0
                 ? "No loaded replays in range."
                 : $"Overall statistics built from {rows.Count} loaded replay(s).";
@@ -323,7 +367,8 @@ public partial class FortniteReplayAnalyzer
         {
             _lblOverallStatsStatus.Text = "Overall statistics refresh stopped.";
             _overallTrendRows = [];
-            _overallTrendsPanel?.Invalidate();
+            _overallDamageTrendPanel?.Invalidate();
+            _overallKillsTrendPanel?.Invalidate();
         }
         finally
         {
@@ -379,25 +424,35 @@ public partial class FortniteReplayAnalyzer
             yield break;
         }
 
-        foreach (var group in replay.DamageEvents
-                     .Where(evt => IsDamageByPlayer(owner, evt))
-                     .Where(evt => IsCombatDamageParticipant(ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot)))
-                     .GroupBy(evt => new
+        var relevantEvents = replay.DamageEvents
+            .Where(evt => IsDamageByPlayer(owner, evt))
+            .Where(evt => IsCombatDamageParticipant(ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot)))
+            .Select(evt => new
+            {
+                Event = evt,
+                WeaponType = GetWeaponStatsTypeLabel(replay, evt),
+                WeaponName = GetWeaponStatsNameLabel(replay, evt)
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x.WeaponType) && !string.Equals(x.WeaponType, "Unknown", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        foreach (var group in relevantEvents
+                     .GroupBy(x => new
                      {
-                         WeaponType = GetWeaponStatsTypeLabel(evt),
-                         WeaponName = GetWeaponStatsNameLabel(evt)
+                         x.WeaponType,
+                         x.WeaponName
                      }))
         {
             var hits = group.Count();
-            var crits = group.Count(evt => evt.IsCritical == true);
-            var damage = group.Sum(evt => evt.Magnitude ?? 0F);
+            var crits = group.Count(x => x.Event.IsCritical == true);
+            var damage = group.Sum(x => x.Event.Magnitude ?? 0F);
             yield return new WeaponStatsRow
             {
                 WeaponType = group.Key.WeaponType,
                 WeaponName = group.Key.WeaponName,
                 Hits = hits,
                 CriticalHits = crits,
-                FatalHits = group.Count(evt => evt.IsFatal == true),
+                FatalHits = group.Count(x => x.Event.IsFatal == true),
                 TotalDamage = damage,
                 AvgDamage = hits == 0 ? 0F : damage / hits,
                 CriticalRate = hits == 0 ? 0F : (float)crits / hits * 100F
@@ -405,12 +460,19 @@ public partial class FortniteReplayAnalyzer
         }
     }
 
-    private static string GetWeaponStatsTypeLabel(DamageEvent evt)
+    private string GetWeaponStatsTypeLabel(FortniteReplay replay, DamageEvent evt)
     {
-        return FormatWeaponType(evt);
+        var label = FormatWeaponType(evt);
+        if (!string.Equals(label, "Unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            return label;
+        }
+
+        var inferred = InferWeaponLabelFromNearbyKillFeed(replay, evt);
+        return string.IsNullOrWhiteSpace(inferred) ? label : inferred;
     }
 
-    private static string GetWeaponStatsNameLabel(DamageEvent evt)
+    private string GetWeaponStatsNameLabel(FortniteReplay replay, DamageEvent evt)
     {
         var displayName = NormalizeWeaponDisplayLabel(evt.WeaponName);
         if (!string.IsNullOrWhiteSpace(displayName))
@@ -419,7 +481,61 @@ public partial class FortniteReplayAnalyzer
         }
 
         var inferred = InferWeaponLabelFromTags([evt.WeaponAssetName ?? string.Empty, evt.WeaponClassName ?? string.Empty]);
-        return string.IsNullOrWhiteSpace(inferred) ? "Unknown" : inferred;
+        if (!string.IsNullOrWhiteSpace(inferred))
+        {
+            return inferred;
+        }
+
+        var nearbyKillFeedWeapon = InferWeaponLabelFromNearbyKillFeed(replay, evt);
+        return string.IsNullOrWhiteSpace(nearbyKillFeedWeapon) ? "Unknown" : nearbyKillFeedWeapon;
+    }
+
+    private string? InferWeaponLabelFromNearbyKillFeed(FortniteReplay replay, DamageEvent evt)
+    {
+        var eventTime = GetDamageTime(evt);
+        var instigatorKey = evt.InstigatorName;
+        var targetKey = evt.TargetName;
+
+        return replay.KillFeed
+            .Where(entry => !entry.IsRevived)
+            .Select(entry => new
+            {
+                Entry = entry,
+                Actor = ResolveKillFeedActorReference(replay, entry),
+                Target = FindPlayer(replay, entry.PlayerId, entry.PlayerName),
+                Reason = FormatKillFeedReason(replay, entry)
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x.Reason) && x.Reason != "-")
+            .Where(x =>
+                (string.Equals(x.Actor.LookupKey, instigatorKey, StringComparison.OrdinalIgnoreCase)
+                 || (evt.InstigatorId.HasValue && x.Actor.Player?.Id == evt.InstigatorId))
+                && ((x.Target is not null && string.Equals(x.Target.PlayerId, targetKey, StringComparison.OrdinalIgnoreCase))
+                    || (evt.TargetId.HasValue && x.Target?.Id == evt.TargetId)
+                    || MatchesKillFeedTarget(x.Entry, evt.TargetId, targetKey)))
+            .OrderBy(x => Math.Abs(GetKillFeedTime(x.Entry) - eventTime))
+            .Select(x => NormalizeKillReasonToWeaponLabel(x.Reason))
+            .FirstOrDefault(reason => !string.IsNullOrWhiteSpace(reason));
+    }
+
+    private static string? NormalizeKillReasonToWeaponLabel(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return null;
+        }
+
+        if (reason.StartsWith("Headshot (", StringComparison.OrdinalIgnoreCase) && reason.EndsWith(")", StringComparison.Ordinal))
+        {
+            return reason["Headshot (".Length..^1].Trim();
+        }
+
+        if (reason.Contains("Storm", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("Fall", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return reason.Trim();
     }
 
     private IEnumerable<DetailRow> BuildOverallStatisticsRows(IEnumerable<ReplayBrowserRow> rows)
@@ -700,7 +816,7 @@ public partial class FortniteReplayAnalyzer
         graphics.DrawString(axisLabel, font, textBrush, chartBounds.Left + (chartBounds.Width - axisLabelSize.Width) / 2F, bounds.Bottom - 20);
     }
 
-    private void PaintOverallTrends(Graphics graphics, Rectangle bounds)
+    private static void PaintOverallTrendChart(Graphics graphics, Rectangle bounds, string title, List<(double Value, string Label)> values, Color barColor)
     {
         graphics.Clear(Color.White);
         using var axisPen = new Pen(Color.Silver, 1F);
@@ -708,20 +824,14 @@ public partial class FortniteReplayAnalyzer
         using var gridPen = new Pen(Color.Gainsboro, 1F);
         using var font = new Font("Segoe UI", 8.5F);
         using var titleFont = new Font("Segoe UI Semibold", 9F, FontStyle.Bold);
-        using var damageBrush = new SolidBrush(Color.FromArgb(52, 123, 220));
-        using var killsBrush = new SolidBrush(Color.FromArgb(244, 124, 32));
+        using var barBrush = new SolidBrush(barColor);
 
-        var leftChart = Rectangle.FromLTRB(bounds.Left + 16, bounds.Top + 28, bounds.Left + (bounds.Width / 2) - 12, bounds.Bottom - 28);
-        var rightChart = Rectangle.FromLTRB(bounds.Left + (bounds.Width / 2) + 12, bounds.Top + 28, bounds.Right - 16, bounds.Bottom - 28);
-
-        graphics.DrawString("Damage Per Match", titleFont, textBrush, leftChart.Left, bounds.Top + 4);
-        graphics.DrawString("Kills Per Match", titleFont, textBrush, rightChart.Left, bounds.Top + 4);
-
-        PaintBarChart(graphics, leftChart, _overallTrendRows.Select(row => ((double)row.DamageToPlayersAndBots, row.Label)).ToList(), damageBrush, axisPen, gridPen, textBrush, font);
-        PaintBarChart(graphics, rightChart, _overallTrendRows.Select(row => ((double)row.Kills, row.Label)).ToList(), killsBrush, axisPen, gridPen, textBrush, font);
+        var chart = Rectangle.FromLTRB(bounds.Left + 90, bounds.Top + 24, bounds.Right - 18, bounds.Bottom - 18);
+        graphics.DrawString(title, titleFont, textBrush, bounds.Left + 12, bounds.Top + 4);
+        PaintHorizontalBarChart(graphics, chart, values, barBrush, axisPen, gridPen, textBrush, font);
     }
 
-    private static void PaintBarChart(Graphics graphics, Rectangle bounds, List<(double Value, string Label)> values, Brush barBrush, Pen axisPen, Pen gridPen, Brush textBrush, Font font)
+    private static void PaintHorizontalBarChart(Graphics graphics, Rectangle bounds, List<(double Value, string Label)> values, Brush barBrush, Pen axisPen, Pen gridPen, Brush textBrush, Font font)
     {
         graphics.DrawRectangle(axisPen, bounds);
         if (values.Count == 0)
@@ -731,27 +841,35 @@ public partial class FortniteReplayAnalyzer
         }
 
         var maxValue = Math.Max(1D, values.Max(x => x.Value));
-        for (var i = 1; i <= 4; i++)
+        for (var i = 0; i <= 4; i++)
         {
-            var y = bounds.Bottom - (bounds.Height * i / 4F);
-            graphics.DrawLine(gridPen, bounds.Left, y, bounds.Right, y);
+            var x = bounds.Left + (bounds.Width * i / 4F);
+            graphics.DrawLine(gridPen, x, bounds.Top, x, bounds.Bottom);
+            var tickValue = maxValue * i / 4D;
+            var tickText = tickValue.ToString("0.#", CultureInfo.CurrentCulture);
+            var tickSize = graphics.MeasureString(tickText, font);
+            graphics.DrawString(tickText, font, textBrush, x - (tickSize.Width / 2F), bounds.Bottom + 2F);
         }
 
-        var barWidth = Math.Max(10F, (bounds.Width - 16F) / Math.Max(1, values.Count) - 8F);
+        var rowHeight = Math.Max(18F, (bounds.Height - 12F) / Math.Max(1, values.Count));
         for (var i = 0; i < values.Count; i++)
         {
             var value = values[i];
-            var x = bounds.Left + 8F + i * (barWidth + 8F);
-            var height = (float)(value.Value / maxValue) * (bounds.Height - 28F);
-            graphics.FillRectangle(barBrush, x, bounds.Bottom - height, barWidth, height);
+            var y = bounds.Top + 6F + i * rowHeight;
+            var barLength = (float)(value.Value / maxValue) * (bounds.Width - 16F);
+            graphics.FillRectangle(barBrush, bounds.Left, y, barLength, Math.Max(10F, rowHeight - 6F));
 
             var label = value.Label;
-            if (label.Length > 8)
+            if (label.Length > 12)
             {
-                label = label[..8];
+                label = label[..12];
             }
 
-            graphics.DrawString(label, font, textBrush, x, bounds.Bottom + 2);
+            var labelSize = graphics.MeasureString(label, font);
+            graphics.DrawString(label, font, textBrush, bounds.Left - labelSize.Width - 6F, y + Math.Max(0F, (rowHeight - labelSize.Height) / 2F));
+
+            var valueText = value.Value.ToString("0.#", CultureInfo.CurrentCulture);
+            graphics.DrawString(valueText, font, textBrush, Math.Min(bounds.Right - 38F, bounds.Left + barLength + 4F), y + Math.Max(0F, (rowHeight - labelSize.Height) / 2F));
         }
     }
 }

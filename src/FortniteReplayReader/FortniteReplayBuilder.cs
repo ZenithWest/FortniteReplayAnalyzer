@@ -63,6 +63,7 @@ public class FortniteReplayBuilder
     public FortniteReplay Build(FortniteReplay replay)
     {
         UpdateTeamData();
+        EnrichDamageEventWeapons();
         replay.GameData = GameData;
         replay.MapData = MapData;
         replay.KillFeed = KillFeed;
@@ -72,6 +73,116 @@ public class FortniteReplayBuilder
         replay.TeamData = _teams.Values;
         replay.PlayerData = _players.Values;
         return replay;
+    }
+
+    private void EnrichDamageEventWeapons()
+    {
+        if (DamageEvents.Count == 0 || _weapons.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var damageEvent in DamageEvents.Where(NeedsWeaponBackfill))
+        {
+            var player = FindInstigatorPlayer(damageEvent);
+            if (player is null)
+            {
+                continue;
+            }
+
+            var weapon = ResolveWeaponForEvent(player, damageEvent);
+            if (weapon is null)
+            {
+                continue;
+            }
+
+            damageEvent.WeaponAssetName ??= weapon.WeaponAssetName;
+            damageEvent.WeaponClassName ??= weapon.WeaponClassName;
+            damageEvent.WeaponName ??= weapon.WeaponName;
+            damageEvent.WeaponType ??= weapon.WeaponType;
+        }
+    }
+
+    private PlayerData? FindInstigatorPlayer(DamageEvent damageEvent)
+    {
+        if (damageEvent.InstigatorId.HasValue && TryGetPlayerDataFromActor((uint)damageEvent.InstigatorId.Value, out var actorPlayer))
+        {
+            return actorPlayer;
+        }
+
+        if (!string.IsNullOrWhiteSpace(damageEvent.InstigatorName))
+        {
+            return _players.Values.FirstOrDefault(player =>
+                string.Equals(player.PlayerId, damageEvent.InstigatorName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(player.PlayerName, damageEvent.InstigatorName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return null;
+    }
+
+    private WeaponData? ResolveWeaponForEvent(PlayerData player, DamageEvent damageEvent)
+    {
+        var actorIds = GetPlayerActorIds(player);
+        if (actorIds.Count == 0)
+        {
+            return ResolveWeapon(player);
+        }
+
+        var eventTime = damageEvent.ReplicatedWorldTimeSecondsDouble
+            ?? damageEvent.ReplicatedWorldTimeSeconds
+            ?? 0D;
+
+        var ownedWeapons = _weapons.Values
+            .Concat(_unknownWeapons.Values)
+            .Where(weapon => (weapon.OwnerActor.HasValue && actorIds.Contains(weapon.OwnerActor.Value))
+                             || (weapon.InstigatorActor.HasValue && actorIds.Contains(weapon.InstigatorActor.Value)))
+            .ToList();
+
+        if (ownedWeapons.Count == 0)
+        {
+            return ResolveWeapon(player);
+        }
+
+        var bestTimedWeapon = ownedWeapons
+            .Where(weapon => weapon.LastFireTimeVerified.HasValue)
+            .OrderBy(weapon => Math.Abs((weapon.LastFireTimeVerified ?? 0F) - eventTime))
+            .ThenByDescending(weapon => weapon.LastFireTimeVerified ?? float.MinValue)
+            .FirstOrDefault();
+
+        if (bestTimedWeapon is not null)
+        {
+            return bestTimedWeapon;
+        }
+
+        return ownedWeapons
+            .OrderByDescending(weapon => weapon.bIsEquippingWeapon == true)
+            .ThenByDescending(weapon => weapon.AmmoCount ?? int.MinValue)
+            .ThenByDescending(weapon => weapon.WeaponLevel ?? int.MinValue)
+            .FirstOrDefault();
+    }
+
+    private HashSet<uint> GetPlayerActorIds(PlayerData player)
+    {
+        var stateChannel = _players.FirstOrDefault(entry => ReferenceEquals(entry.Value, player)).Key;
+        if (stateChannel == 0)
+        {
+            return [];
+        }
+
+        return _pawnChannelToStateChannel
+            .Where(entry => entry.Value == stateChannel)
+            .Select(entry => _channelToActor.TryGetValue(entry.Key, out var actorId) ? (uint?)actorId : null)
+            .Where(actorId => actorId.HasValue)
+            .Select(actorId => actorId!.Value)
+            .ToHashSet();
+    }
+
+    private static bool NeedsWeaponBackfill(DamageEvent damageEvent)
+    {
+        return string.IsNullOrWhiteSpace(damageEvent.WeaponName)
+               && string.IsNullOrWhiteSpace(damageEvent.WeaponType)
+               && string.IsNullOrWhiteSpace(damageEvent.WeaponAssetName)
+               && string.IsNullOrWhiteSpace(damageEvent.WeaponClassName);
     }
 
     private bool TryGetPlayerDataFromActor(uint guid, [NotNullWhen(returnValue: true)] out PlayerData? playerData)
