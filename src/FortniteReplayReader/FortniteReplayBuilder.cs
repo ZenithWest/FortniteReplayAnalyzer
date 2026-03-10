@@ -632,7 +632,12 @@ public class FortniteReplayBuilder
             return;
         }
 
-        var weapon = ResolveWeapon(instigator);
+        var weapon = ResolveWeapon(
+            instigator,
+            gameplayCue.Parameters.EffectCauser,
+            effectContext?.EffectCauser,
+            gameplayCue.Parameters.SourceObject,
+            effectContext?.SourceObject);
 
         DamageEvents.Add(new DamageEvent
         {
@@ -722,24 +727,24 @@ public class FortniteReplayBuilder
         });
     }
 
-    private WeaponData? ResolveWeapon(PlayerData? player)
+    private WeaponData? ResolveWeapon(PlayerData? player, params uint?[] directReferences)
     {
+        foreach (var directReference in directReferences)
+        {
+            if (TryResolveWeaponByReference(directReference, out var directWeapon))
+            {
+                return directWeapon;
+            }
+        }
+
         if (player is null)
         {
             return null;
         }
 
-        if (player.CurrentWeapon is uint weaponChannel)
+        if (TryResolveWeaponByReference(player.CurrentWeapon, out var currentWeapon))
         {
-            if (_weapons.TryGetValue(weaponChannel, out var weapon))
-            {
-                return weapon;
-            }
-
-            if (_unknownWeapons.TryGetValue(weaponChannel, out var unknownWeapon))
-            {
-                return unknownWeapon;
-            }
+            return currentWeapon;
         }
 
         var stateChannel = _players.FirstOrDefault(entry => ReferenceEquals(entry.Value, player)).Key;
@@ -767,6 +772,30 @@ public class FortniteReplayBuilder
             .OrderByDescending(weapon => weapon.LastFireTimeVerified ?? float.MinValue)
             .ThenByDescending(weapon => weapon.bIsEquippingWeapon == true)
             .FirstOrDefault();
+    }
+
+    private bool TryResolveWeaponByReference(uint? weaponReference, [NotNullWhen(true)] out WeaponData? weapon)
+    {
+        weapon = null;
+        if (!weaponReference.HasValue || weaponReference.Value == 0)
+        {
+            return false;
+        }
+
+        if (_weapons.TryGetValue(weaponReference.Value, out weapon) || _unknownWeapons.TryGetValue(weaponReference.Value, out weapon))
+        {
+            return true;
+        }
+
+        if (_actorToChannel.TryGetValue(weaponReference.Value, out var weaponChannel))
+        {
+            if (_weapons.TryGetValue(weaponChannel, out weapon) || _unknownWeapons.TryGetValue(weaponChannel, out weapon))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string NormalizeWeaponType(string? weaponAssetName, string? weaponClassName, string? weaponDisplayName)

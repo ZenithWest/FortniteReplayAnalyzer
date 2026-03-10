@@ -894,7 +894,7 @@ public partial class FortniteReplayAnalyzer : Form
             TargetId = targetPlayer?.Id ?? entry.PlayerId,
             TargetLookupKey = targetPlayer?.PlayerId ?? entry.PlayerName,
             EventText = GetKillFeedEventText(entry),
-            ReasonText = FormatKillFeedReason(entry),
+            ReasonText = FormatKillFeedReason(replay, entry),
             DistanceText = FormatDistance(entry.Distance)
         };
     }
@@ -1156,7 +1156,7 @@ public partial class FortniteReplayAnalyzer : Form
                     PlayerLookupKey = victim?.PlayerId ?? entry.PlayerName,
                     IsBot = victim?.IsBot ?? false,
                     EventText = GetKillFeedEventText(entry),
-                    ReasonText = FormatKillFeedReason(entry),
+                    ReasonText = FormatKillFeedReason(replay, entry),
                     TimeText = FormatMatchClock(GetKillFeedTime(entry)),
                     DistanceText = FormatDistance(entry.Distance)
                 };
@@ -1519,24 +1519,34 @@ public partial class FortniteReplayAnalyzer : Form
 
     private static string FormatWeaponType(DamageEvent evt)
     {
-        if (!string.IsNullOrWhiteSpace(evt.WeaponType) && !string.Equals(evt.WeaponType, "Unknown", StringComparison.OrdinalIgnoreCase))
+        var displayName = NormalizeWeaponDisplayLabel(evt.WeaponName);
+        if (!string.IsNullOrWhiteSpace(displayName) && !string.Equals(displayName, "Unknown", StringComparison.OrdinalIgnoreCase))
         {
-            return evt.WeaponType!;
+            return displayName;
         }
 
-        if (!string.IsNullOrWhiteSpace(evt.WeaponName) && !string.Equals(evt.WeaponName, "Unknown", StringComparison.OrdinalIgnoreCase))
+        var weaponType = NormalizeWeaponTypeLabel(evt.WeaponType);
+        if (!string.IsNullOrWhiteSpace(weaponType) && !string.Equals(weaponType, "Unknown", StringComparison.OrdinalIgnoreCase))
         {
-            return evt.WeaponName!;
-        }
-
-        if (!string.IsNullOrWhiteSpace(evt.WeaponClassName))
-        {
-            return evt.WeaponClassName!;
+            return weaponType;
         }
 
         if (!string.IsNullOrWhiteSpace(evt.WeaponAssetName))
         {
-            return evt.WeaponAssetName!;
+            var inferredFromAsset = InferWeaponLabelFromTags([evt.WeaponAssetName]);
+            if (!string.IsNullOrWhiteSpace(inferredFromAsset))
+            {
+                return inferredFromAsset;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.WeaponClassName))
+        {
+            var inferredFromClass = InferWeaponLabelFromTags([evt.WeaponClassName]);
+            if (!string.IsNullOrWhiteSpace(inferredFromClass))
+            {
+                return inferredFromClass;
+            }
         }
 
         return "Unknown";
@@ -2364,26 +2374,198 @@ public partial class FortniteReplayAnalyzer : Form
 
     private static string GetKillFeedEventText(KillFeedEntry entry) => entry.IsRevived ? "Revived" : entry.IsDowned ? "Downed" : "Eliminated";
 
-    private static string FormatKillFeedReason(KillFeedEntry entry)
+    private static string FormatKillFeedReason(FortniteReplay replay, KillFeedEntry entry)
     {
         var tags = entry.DeathTags?
             .Where(tag => !string.IsNullOrWhiteSpace(tag))
-            .Select(ShortGameplayTag)
-            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Select(tag => tag.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            .ToList() ?? [];
 
-        if (tags is { Count: > 0 })
+        var environmentalReason = InferEnvironmentalReason(entry.DeathCause, tags);
+        if (!string.IsNullOrWhiteSpace(environmentalReason))
         {
-            return string.Join(", ", tags.Take(2));
+            return environmentalReason;
+        }
+
+        var weaponLabel = InferWeaponLabelFromTags(tags);
+        if (string.IsNullOrWhiteSpace(weaponLabel))
+        {
+            weaponLabel = GetWeaponLabelFromMatchingElimination(replay, entry);
+        }
+
+        if (!string.IsNullOrWhiteSpace(weaponLabel))
+        {
+            return HasHeadshotTag(tags) ? $"Headshot ({weaponLabel})" : weaponLabel;
         }
 
         if (entry.DeathCause.HasValue)
         {
-            return $"Cause {entry.DeathCause.Value}";
+            return entry.DeathCause.Value switch
+            {
+                50 => "Storm Damage",
+                _ => $"Cause {entry.DeathCause.Value}"
+            };
         }
 
         return "-";
+    }
+
+    private static string? GetWeaponLabelFromMatchingElimination(FortniteReplay replay, KillFeedEntry entry)
+    {
+        var targetPlayer = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
+        var actorReference = ResolveKillFeedActorReference(replay, entry);
+        var targetLookupKey = targetPlayer?.PlayerId ?? entry.PlayerName;
+        var actorLookupKey = actorReference.Player?.PlayerId ?? actorReference.LookupKey;
+        var targetId = targetLookupKey ?? entry.PlayerId?.ToString(CultureInfo.InvariantCulture);
+        var actorId = actorLookupKey ?? actorReference.NumericId?.ToString(CultureInfo.InvariantCulture);
+        if (string.IsNullOrWhiteSpace(targetId))
+        {
+            return null;
+        }
+
+        var desiredKnocked = entry.IsDowned;
+        var entryTime = GetKillFeedTime(entry);
+        var matchingElimination = replay.Eliminations
+            .Where(elim => string.Equals(elim.Eliminated, targetId, StringComparison.OrdinalIgnoreCase))
+            .Where(elim => string.IsNullOrWhiteSpace(actorId) || string.Equals(elim.Eliminator, actorId, StringComparison.OrdinalIgnoreCase))
+            .Where(elim => desiredKnocked == elim.Knocked || !entry.IsDowned)
+            .Select(elim => new { Elimination = elim, Delta = Math.Abs(ParseEventClock(elim.Time) - entryTime) })
+            .OrderBy(match => match.Delta)
+            .FirstOrDefault(match => match.Delta <= 4.0d);
+
+        return matchingElimination is null ? null : MapGunType(matchingElimination.Elimination.GunType);
+    }
+
+    private static string? InferEnvironmentalReason(int? deathCause, IEnumerable<string> tags)
+    {
+        var tagList = tags.ToList();
+        if (deathCause == 50
+            || tagList.Any(tag => tag.Contains("OutsideSafeZone", StringComparison.OrdinalIgnoreCase))
+            || tagList.Any(tag => tag.Contains("Storm", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "Storm Damage";
+        }
+
+        if (tagList.Any(tag => tag.Contains("Gameplay.Damage.Fall", StringComparison.OrdinalIgnoreCase))
+            || tagList.Any(tag => tag.Contains("FallDamage", StringComparison.OrdinalIgnoreCase))
+            || tagList.Any(tag => tag.Contains("Gameplay.Damage.Environment.Fall", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "Fall Damage";
+        }
+
+        return null;
+    }
+
+    private static bool HasHeadshotTag(IEnumerable<string> tags)
+    {
+        return tags.Any(tag => tag.Contains("headshot", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? InferWeaponLabelFromTags(IEnumerable<string> tags)
+    {
+        foreach (var tag in tags)
+        {
+            if (tag.Contains("weapon.ranged.smg", StringComparison.OrdinalIgnoreCase)
+                || tag.Contains("Item.Weapon.Ranged.SMG", StringComparison.OrdinalIgnoreCase)
+                || tag.Contains("Bacchus.Shoot.SMG", StringComparison.OrdinalIgnoreCase))
+            {
+                return "SMG";
+            }
+
+            if (tag.Contains("weapon.ranged.shotgun", StringComparison.OrdinalIgnoreCase)
+                || tag.Contains("Item.Weapon.Ranged.Shotgun", StringComparison.OrdinalIgnoreCase)
+                || tag.Contains("Bacchus.Shoot.Shotgun", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Shotgun";
+            }
+
+            if (tag.Contains("weapon.ranged.assault", StringComparison.OrdinalIgnoreCase)
+                || tag.Contains("Item.Weapon.Ranged.Assault", StringComparison.OrdinalIgnoreCase)
+                || tag.Contains("Item.Weapon.Ranged.AR", StringComparison.OrdinalIgnoreCase)
+                || tag.Contains("Bacchus.Shoot.AR", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Assault Rifle";
+            }
+
+            if (tag.Contains("weapon.ranged.pistol", StringComparison.OrdinalIgnoreCase)
+                || tag.Contains("Item.Weapon.Ranged.Pistol", StringComparison.OrdinalIgnoreCase)
+                || tag.Contains("Bacchus.Shoot.Pistol", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Pistol";
+            }
+
+            if (tag.Contains("weapon.ranged.sniper", StringComparison.OrdinalIgnoreCase)
+                || tag.Contains("Item.Weapon.Ranged.Sniper", StringComparison.OrdinalIgnoreCase)
+                || tag.Contains("Bacchus.Shoot.Sniper", StringComparison.OrdinalIgnoreCase)
+                || tag.Contains("weapon.ranged.dmr", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Sniper";
+            }
+        }
+
+        return null;
+    }
+
+    private static string NormalizeWeaponTypeLabel(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "Unknown";
+        }
+
+        return value.Trim() switch
+        {
+            "Rifle" => "Assault Rifle",
+            "Marksman" => "Sniper",
+            "Other" => "Unknown",
+            var label => label
+        };
+    }
+
+    private static string? NormalizeWeaponDisplayLabel(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var cleaned = value.Trim();
+        if (cleaned.Contains('/'))
+        {
+            cleaned = cleaned[(cleaned.LastIndexOf('/') + 1)..];
+        }
+
+        cleaned = cleaned.Replace('_', ' ');
+        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, "(?<=[a-z])(?=[A-Z])", " ");
+        cleaned = cleaned.Replace("  ", " ").Trim();
+
+        if (cleaned.StartsWith("Fort Weapon", StringComparison.OrdinalIgnoreCase)
+            || cleaned.StartsWith("Base Weapon", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return cleaned;
+    }
+
+    private static string? MapGunType(byte gunType)
+    {
+        return gunType switch
+        {
+            2 => "Pistol",
+            3 => "Shotgun",
+            4 => "Assault Rifle",
+            5 => "SMG",
+            _ => null
+        };
+    }
+
+    private static double ParseEventClock(string? value)
+    {
+        return TimeSpan.TryParseExact(value, @"mm\:ss", CultureInfo.InvariantCulture, out var parsed)
+            ? parsed.TotalSeconds
+            : 0d;
     }
 
     private static string ShortGameplayTag(string value)

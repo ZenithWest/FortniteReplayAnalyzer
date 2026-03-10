@@ -407,42 +407,19 @@ public partial class FortniteReplayAnalyzer
 
     private static string GetWeaponStatsTypeLabel(DamageEvent evt)
     {
-        if (!string.IsNullOrWhiteSpace(evt.WeaponType) && !string.Equals(evt.WeaponType, "Unknown", StringComparison.OrdinalIgnoreCase))
-        {
-            return evt.WeaponType!;
-        }
-
-        if (!string.IsNullOrWhiteSpace(evt.WeaponClassName))
-        {
-            return evt.WeaponClassName!;
-        }
-
-        if (!string.IsNullOrWhiteSpace(evt.WeaponAssetName))
-        {
-            return evt.WeaponAssetName!;
-        }
-
-        return "Unknown";
+        return FormatWeaponType(evt);
     }
 
     private static string GetWeaponStatsNameLabel(DamageEvent evt)
     {
-        if (!string.IsNullOrWhiteSpace(evt.WeaponName) && !string.Equals(evt.WeaponName, "Unknown", StringComparison.OrdinalIgnoreCase))
+        var displayName = NormalizeWeaponDisplayLabel(evt.WeaponName);
+        if (!string.IsNullOrWhiteSpace(displayName))
         {
-            return evt.WeaponName!;
+            return displayName;
         }
 
-        if (!string.IsNullOrWhiteSpace(evt.WeaponAssetName))
-        {
-            return evt.WeaponAssetName!;
-        }
-
-        if (!string.IsNullOrWhiteSpace(evt.WeaponClassName))
-        {
-            return evt.WeaponClassName!;
-        }
-
-        return "Unknown";
+        var inferred = InferWeaponLabelFromTags([evt.WeaponAssetName ?? string.Empty, evt.WeaponClassName ?? string.Empty]);
+        return string.IsNullOrWhiteSpace(inferred) ? "Unknown" : inferred;
     }
 
     private IEnumerable<DetailRow> BuildOverallStatisticsRows(IEnumerable<ReplayBrowserRow> rows)
