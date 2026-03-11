@@ -67,8 +67,8 @@ public partial class FortniteReplayAnalyzer
         page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        page.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        page.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
         var filters = CreateFilterFlowPanel();
         filters.AutoScroll = false;
@@ -112,7 +112,8 @@ public partial class FortniteReplayAnalyzer
             Minimum = 0,
             Maximum = 1,
             Value = 0,
-            Style = ProgressBarStyle.Continuous
+            Style = ProgressBarStyle.Continuous,
+            Visible = false
         };
 
         _dgvWeaponStats = new DataGridView { Name = "dgvWeaponStats" };
@@ -309,25 +310,37 @@ public partial class FortniteReplayAnalyzer
             return;
         }
 
-        ToggleAggregateDatePickers(_cmbWeaponRange, _dtWeaponFrom, _dtWeaponTo);
+        ToggleAggregateDatePickers(GetWeaponSelectedRange(), _dtWeaponFrom, _dtWeaponTo);
         _weaponStatsLoadCts?.Cancel();
         _weaponStatsLoadCts = new CancellationTokenSource();
         var cancellationToken = _weaponStatsLoadCts.Token;
         _lblWeaponStatsStatus.Text = "Building weapon stats from already-loaded replays...";
         if (_btnWeaponStatsStop is not null) _btnWeaponStatsStop.Enabled = true;
+        _weaponStatsProgressBar.Visible = true;
         _weaponStatsProgressBar.Maximum = 1;
         _weaponStatsProgressBar.Value = 0;
 
         try
         {
-            var rows = await GetAggregateReplayRowsAsync(_cmbWeaponRange, _dtWeaponFrom, _dtWeaponTo, cancellationToken);
+            var rows = await GetAggregateReplayRowsAsync(GetWeaponSelectedRange(), _dtWeaponFrom, _dtWeaponTo, cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                _lblWeaponStatsStatus.Text = "Weapon stats refresh stopped.";
+                return;
+            }
+
             _weaponStatsProgressBar.Maximum = Math.Max(1, rows.Count);
             var progress = new Progress<int>(value =>
             {
                 _weaponStatsProgressBar.Value = Math.Max(_weaponStatsProgressBar.Minimum, Math.Min(_weaponStatsProgressBar.Maximum, value));
             });
 
-            var weaponRows = await Task.Run(() => BuildWeaponStatsSummary(rows, _chkWeaponIncludeBots?.Checked ?? true, progress, cancellationToken), cancellationToken);
+            var weaponRows = await Task.Run(() => BuildWeaponStatsSummary(rows, _chkWeaponIncludeBots?.Checked ?? true, progress, cancellationToken));
+            if (cancellationToken.IsCancellationRequested)
+            {
+                _lblWeaponStatsStatus.Text = "Weapon stats refresh stopped.";
+                return;
+            }
 
             _dgvWeaponStats.DataSource = weaponRows;
             _lblWeaponStatsStatus.Text = rows.Count == 0
@@ -341,6 +354,7 @@ public partial class FortniteReplayAnalyzer
         finally
         {
             if (_btnWeaponStatsStop is not null) _btnWeaponStatsStop.Enabled = false;
+            _weaponStatsProgressBar.Visible = false;
         }
     }
 
@@ -351,7 +365,7 @@ public partial class FortniteReplayAnalyzer
             return;
         }
 
-        ToggleAggregateDatePickers(_cmbOverallRange, _dtOverallFrom, _dtOverallTo);
+        ToggleAggregateDatePickers(GetOverallSelectedRange(), _dtOverallFrom, _dtOverallTo);
         _overallStatsLoadCts?.Cancel();
         _overallStatsLoadCts = new CancellationTokenSource();
         var cancellationToken = _overallStatsLoadCts.Token;
@@ -360,12 +374,28 @@ public partial class FortniteReplayAnalyzer
 
         try
         {
-            var rows = await GetAggregateReplayRowsAsync(_cmbOverallRange, _dtOverallFrom, _dtOverallTo, cancellationToken);
+            var rows = await GetAggregateReplayRowsAsync(GetOverallSelectedRange(), _dtOverallFrom, _dtOverallTo, cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                _lblOverallStatsStatus.Text = "Overall statistics refresh stopped.";
+                _overallTrendRows = [];
+                _overallDamageTrendPanel?.Invalidate();
+                _overallKillsTrendPanel?.Invalidate();
+                return;
+            }
+
             var detailRows = await Task.Run(() =>
             {
-                cancellationToken.ThrowIfCancellationRequested();
                 return BuildOverallStatisticsRows(rows).ToList();
-            }, cancellationToken);
+            });
+            if (cancellationToken.IsCancellationRequested)
+            {
+                _lblOverallStatsStatus.Text = "Overall statistics refresh stopped.";
+                _overallTrendRows = [];
+                _overallDamageTrendPanel?.Invalidate();
+                _overallKillsTrendPanel?.Invalidate();
+                return;
+            }
 
             _dgvOverallStats.DataSource = detailRows;
             _overallTrendRows = BuildOverallTrendRows(rows).ToList();
@@ -388,10 +418,14 @@ public partial class FortniteReplayAnalyzer
         }
     }
 
-    private Task<List<ReplayBrowserRow>> GetAggregateReplayRowsAsync(ComboBox? rangeCombo, DateTimePicker? fromPicker, DateTimePicker? toPicker, CancellationToken cancellationToken)
+    private Task<List<ReplayBrowserRow>> GetAggregateReplayRowsAsync(AggregateRangeOption range, DateTimePicker? fromPicker, DateTimePicker? toPicker, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (GetSelectedRange(rangeCombo) == AggregateRangeOption.CurrentMatch)
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromResult(new List<ReplayBrowserRow>());
+        }
+
+        if (range == AggregateRangeOption.CurrentMatch)
         {
             if (_selectedReplayRow?.Replay is not null)
             {
@@ -402,14 +436,14 @@ public partial class FortniteReplayAnalyzer
         }
 
         var filtered = _replayRows
-            .Where(row => IsReplayInAggregateRange(row, GetSelectedRange(rangeCombo), fromPicker, toPicker))
+            .Where(row => IsReplayInAggregateRange(row, range, fromPicker, toPicker))
             .Where(row => row.Replay is not null)
             .OrderByDescending(row => row.RecordedAt)
             .ToList();
         return Task.FromResult(filtered);
     }
 
-    private static AggregateRangeOption GetSelectedRange(ComboBox? comboBox) => comboBox?.SelectedIndex switch
+    private AggregateRangeOption GetWeaponSelectedRange() => _cmbWeaponRange?.SelectedIndex switch
     {
         0 => AggregateRangeOption.CurrentMatch,
         2 => AggregateRangeOption.Last7Days,
@@ -418,9 +452,17 @@ public partial class FortniteReplayAnalyzer
         _ => AggregateRangeOption.AllTime
     };
 
-    private static void ToggleAggregateDatePickers(ComboBox? comboBox, DateTimePicker? fromPicker, DateTimePicker? toPicker)
+    private AggregateRangeOption GetOverallSelectedRange() => _cmbOverallRange?.SelectedIndex switch
     {
-        var isCustom = GetSelectedRange(comboBox) == AggregateRangeOption.Custom;
+        1 => AggregateRangeOption.Last7Days,
+        2 => AggregateRangeOption.Last30Days,
+        3 => AggregateRangeOption.Custom,
+        _ => AggregateRangeOption.AllTime
+    };
+
+    private static void ToggleAggregateDatePickers(AggregateRangeOption range, DateTimePicker? fromPicker, DateTimePicker? toPicker)
+    {
+        var isCustom = range == AggregateRangeOption.Custom;
         if (fromPicker is not null) fromPicker.Enabled = isCustom;
         if (toPicker is not null) toPicker.Enabled = isCustom;
     }
@@ -448,7 +490,11 @@ public partial class FortniteReplayAnalyzer
 
         for (var index = 0; index < rows.Count; index++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
             BuildWeaponStatsRowsForReplay(rows[index], includeBotDamage, accumulators);
             progress?.Report(index + 1);
         }
