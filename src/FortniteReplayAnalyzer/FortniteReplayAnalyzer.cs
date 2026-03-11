@@ -1751,9 +1751,16 @@ public partial class FortniteReplayAnalyzer : Form
         if (_replayDragSelectionChanged)
         {
             _ignoreReplayBrowserCellClick = true;
-            _ignoreReplaySelectionChanged = false;
+            _ignoreReplaySelectionChanged = true;
+            _suppressReplaySelectionChanged = true;
             dgvReplayBrowser.CurrentCell = null;
-            _replayDragSelectionChanged = false;
+
+            BeginInvoke(new Action(() =>
+            {
+                _suppressReplaySelectionChanged = false;
+                _ignoreReplaySelectionChanged = false;
+                _replayDragSelectionChanged = false;
+            }));
         }
     }
 
