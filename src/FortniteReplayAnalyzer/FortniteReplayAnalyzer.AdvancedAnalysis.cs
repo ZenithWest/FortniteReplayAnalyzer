@@ -1039,14 +1039,17 @@ public partial class FortniteReplayAnalyzer
             else
             {
                 using var brush = new SolidBrush(Color.FromArgb(140, color));
-                var slotWidth = Math.Max(3F, chartBounds.Width / Math.Max(1F, (float)series.Points.Count * _timelineSeries.Count));
+                var slotWidth = Math.Max(3F, chartBounds.Width / Math.Max(8F, maxTime / 8F));
                 for (var j = 0; j < series.Points.Count; j++)
                 {
                     var point = series.Points[j];
-                    var x = chartBounds.Left + (float)(point.TimeValue / maxTime) * chartBounds.Width;
+                    var centerX = chartBounds.Left + (float)(point.TimeValue / maxTime) * chartBounds.Width;
                     var offset = (i - (_timelineSeries.Count - 1) / 2F) * slotWidth;
-                    var height = (point.Damage / maxDamage) * chartBounds.Height;
-                    graphics.FillRectangle(brush, x + offset, chartBounds.Bottom - height, Math.Max(2F, slotWidth - 1F), height);
+                    var height = (float)((point.Damage / maxDamage) * chartBounds.Height);
+                    var rectX = (float)(centerX + offset - (slotWidth / 2F));
+                    var rectY = chartBounds.Bottom - height;
+                    var rectWidth = (float)Math.Max(2F, slotWidth - 1F);
+                    graphics.FillRectangle(brush, new RectangleF(rectX, rectY, rectWidth, height));
                 }
             }
 

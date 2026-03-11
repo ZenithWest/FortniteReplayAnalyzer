@@ -950,7 +950,7 @@ public partial class FortniteReplayAnalyzer : Form
             TargetLookupKey = target?.PlayerId ?? evt.TargetName,
             EventText = evt.EventTag ?? evt.EventSource ?? "-",
             DamageText = evt.Magnitude.HasValue ? evt.Magnitude.Value.ToString("0.#", CultureInfo.CurrentCulture) : "-",
-            WeaponTypeText = FormatWeaponType(evt),
+            WeaponTypeText = FormatCombatEventWeaponType(replay, evt),
             ShieldText = evt.IsShield switch { true => "Yes", false => "No", _ => "-" },
             FatalText = FormatBool(evt.IsFatal),
             CriticalText = FormatBool(evt.IsCritical),
@@ -1581,6 +1581,31 @@ public partial class FortniteReplayAnalyzer : Form
         }
 
         return "Unknown";
+    }
+
+    private string FormatCombatEventWeaponType(FortniteReplay replay, DamageEvent evt)
+    {
+        var label = FormatWeaponType(evt);
+        if (!string.Equals(label, "Unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            return label;
+        }
+
+        var inferred = InferWeaponLabelFromNearbyDamageEvent(replay, evt)
+            ?? InferWeaponLabelFromNearbyKillFeed(replay, evt);
+
+        return string.IsNullOrWhiteSpace(inferred) ? label : inferred;
+    }
+
+    private static string? InferWeaponLabelFromNearbyDamageEvent(FortniteReplay replay, DamageEvent evt)
+    {
+        var eventTime = GetDamageTime(evt);
+        return replay.DamageEvents
+            .Where(candidate => !ReferenceEquals(candidate, evt))
+            .Where(candidate => candidate.InstigatorId == evt.InstigatorId && candidate.TargetId == evt.TargetId)
+            .Where(candidate => Math.Abs(GetDamageTime(candidate) - eventTime) <= 2.5D)
+            .Select(FormatWeaponType)
+            .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate) && !string.Equals(candidate, "Unknown", StringComparison.OrdinalIgnoreCase));
     }
 
 
