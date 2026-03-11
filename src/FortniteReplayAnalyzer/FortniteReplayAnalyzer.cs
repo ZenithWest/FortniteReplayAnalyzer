@@ -639,6 +639,11 @@ public partial class FortniteReplayAnalyzer : Form
             return;
         }
 
+        if ((ModifierKeys & Keys.Shift) == Keys.Shift || _replayDragSelectionChanged)
+        {
+            return;
+        }
+
         if (e.RowIndex < 0 || e.RowIndex >= dgvReplayBrowser.Rows.Count)
         {
             return;
@@ -1750,6 +1755,7 @@ public partial class FortniteReplayAnalyzer : Form
 
         if (_replayDragSelectionChanged)
         {
+            var selectedIndices = GetSelectedReplayRowIndices();
             _ignoreReplayBrowserCellClick = true;
             _ignoreReplaySelectionChanged = true;
             _suppressReplaySelectionChanged = true;
@@ -1757,6 +1763,8 @@ public partial class FortniteReplayAnalyzer : Form
 
             BeginInvoke(new Action(() =>
             {
+                ReapplyReplaySelection(selectedIndices);
+                dgvReplayBrowser.CurrentCell = null;
                 _suppressReplaySelectionChanged = false;
                 _ignoreReplaySelectionChanged = false;
                 _replayDragSelectionChanged = false;
@@ -1981,6 +1989,36 @@ public partial class FortniteReplayAnalyzer : Form
             for (var index = start; index <= end; index++)
             {
                 dgvReplayBrowser.Rows[index].Selected = true;
+            }
+        }
+        finally
+        {
+            _suppressReplaySelectionChanged = false;
+        }
+    }
+
+    private List<int> GetSelectedReplayRowIndices()
+    {
+        return dgvReplayBrowser.SelectedRows
+            .Cast<DataGridViewRow>()
+            .Select(row => row.Index)
+            .Where(index => index >= 0 && index < dgvReplayBrowser.Rows.Count)
+            .OrderBy(index => index)
+            .ToList();
+    }
+
+    private void ReapplyReplaySelection(IReadOnlyList<int> indices)
+    {
+        _suppressReplaySelectionChanged = true;
+        try
+        {
+            dgvReplayBrowser.ClearSelection();
+            foreach (var index in indices)
+            {
+                if (index >= 0 && index < dgvReplayBrowser.Rows.Count)
+                {
+                    dgvReplayBrowser.Rows[index].Selected = true;
+                }
             }
         }
         finally
