@@ -423,6 +423,7 @@ public partial class FortniteReplayAnalyzer : Form
         dgvReplayBrowser.CellClick += async (_, e) => await HandleReplayBrowserCellClickAsync(e);
         dgvReplayBrowser.ColumnHeaderMouseClick += (_, e) => SortReplayRows(dgvReplayBrowser.Columns[e.ColumnIndex].Name);
         dgvReplayBrowser.CellMouseDown += HandleReplayBrowserCellMouseDown;
+        dgvReplayBrowser.CellMouseUp += HandleReplayBrowserCellMouseUp;
         dgvReplayBrowser.KeyDown += HandleReplayBrowserKeyDown;
 
 
@@ -1706,7 +1707,6 @@ public partial class FortniteReplayAnalyzer : Form
                 _ignoreReplaySelectionChanged = true;
                 _pendingReplayRangeSelectionIndex = e.RowIndex;
                 _ignoreReplayBrowserCellClick = true;
-                BeginInvoke(new Action(CompletePendingReplayRangeSelection));
                 return;
             }
 
@@ -1718,6 +1718,16 @@ public partial class FortniteReplayAnalyzer : Form
         {
             _contextMenuReplayRow = dgvReplayBrowser.Rows[e.RowIndex].DataBoundItem as ReplayBrowserRow;
         }
+    }
+
+    private void HandleReplayBrowserCellMouseUp(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left || _pendingReplayRangeSelectionIndex < 0)
+        {
+            return;
+        }
+
+        CompletePendingReplayRangeSelection();
     }
 
     private ReplayBrowserRow? GetReplayRowForContextMenu()
@@ -1927,9 +1937,11 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void ApplyReplayRangeSelection(int clickedRowIndex)
     {
-        var anchorIndex = _replaySelectionAnchorIndex >= 0
-            ? _replaySelectionAnchorIndex
-            : dgvReplayBrowser.CurrentRow?.Index ?? clickedRowIndex;
+        var anchorIndex = _selectedReplayRow is not null
+            ? _replayRows.IndexOf(_selectedReplayRow)
+            : _replaySelectionAnchorIndex >= 0
+                ? _replaySelectionAnchorIndex
+                : dgvReplayBrowser.CurrentRow?.Index ?? clickedRowIndex;
 
         var start = Math.Min(anchorIndex, clickedRowIndex);
         var end = Math.Max(anchorIndex, clickedRowIndex);
