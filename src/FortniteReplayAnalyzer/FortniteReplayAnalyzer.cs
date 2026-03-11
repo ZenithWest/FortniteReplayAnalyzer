@@ -1727,7 +1727,7 @@ public partial class FortniteReplayAnalyzer : Form
             return;
         }
 
-        CompletePendingReplayRangeSelection();
+        BeginInvoke(new Action(CompletePendingReplayRangeSelection));
     }
 
     private ReplayBrowserRow? GetReplayRowForContextMenu()
