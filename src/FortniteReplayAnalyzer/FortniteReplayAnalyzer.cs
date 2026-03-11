@@ -1942,8 +1942,6 @@ public partial class FortniteReplayAnalyzer : Form
             {
                 dgvReplayBrowser.Rows[index].Selected = true;
             }
-
-            RestoreReplayBrowserCurrentRow();
         }
         finally
         {
@@ -1953,6 +1951,12 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void RestoreReplayBrowserCurrentRow()
     {
+        if (dgvReplayBrowser.SelectedRows.Count > 1)
+        {
+            dgvReplayBrowser.CurrentCell = null;
+            return;
+        }
+
         if (_selectedReplayRow is null || dgvReplayBrowser.Columns.Count == 0)
         {
             dgvReplayBrowser.CurrentCell = null;
@@ -1983,7 +1987,18 @@ public partial class FortniteReplayAnalyzer : Form
             return;
         }
 
-        dgvReplayBrowser.CurrentCell = row.Cells[firstVisibleColumn.Index];
+        try
+        {
+            dgvReplayBrowser.CurrentCell = row.Cells[firstVisibleColumn.Index];
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            dgvReplayBrowser.CurrentCell = null;
+        }
+        catch (InvalidOperationException)
+        {
+            dgvReplayBrowser.CurrentCell = null;
+        }
     }
 
     private void StopReplayLoad(ReplayBrowserRow row)
