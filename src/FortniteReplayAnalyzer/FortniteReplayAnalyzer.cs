@@ -66,10 +66,11 @@ public partial class FortniteReplayAnalyzer : Form
     private int _lastExpandedReplayPaneWidth = ExpandedReplayPaneWidth;
     private readonly HashSet<DataGridView> _iconTextConfiguredGrids = [];
     private PictureBox? _picSelectedPlayer;
-    private int _replaySelectionAnchorIndex = -1;
     private bool _ignoreReplayBrowserCellClick;
     private bool _ignoreReplaySelectionChanged;
-    private int _pendingReplayRangeSelectionIndex = -1;
+    private bool _isReplayDragSelecting;
+    private bool _replayDragSelectionChanged;
+    private int _replayDragStartIndex = -1;
 
     private string ReplayFolder => string.IsNullOrWhiteSpace(_settings.DefaultReplaysFolder) ? DefaultReplayFolder : _settings.DefaultReplaysFolder;
 
@@ -423,6 +424,7 @@ public partial class FortniteReplayAnalyzer : Form
         dgvReplayBrowser.CellClick += async (_, e) => await HandleReplayBrowserCellClickAsync(e);
         dgvReplayBrowser.ColumnHeaderMouseClick += (_, e) => SortReplayRows(dgvReplayBrowser.Columns[e.ColumnIndex].Name);
         dgvReplayBrowser.CellMouseDown += HandleReplayBrowserCellMouseDown;
+        dgvReplayBrowser.CellMouseEnter += HandleReplayBrowserCellMouseEnter;
         dgvReplayBrowser.CellMouseUp += HandleReplayBrowserCellMouseUp;
         dgvReplayBrowser.KeyDown += HandleReplayBrowserKeyDown;
 
@@ -631,9 +633,9 @@ public partial class FortniteReplayAnalyzer : Form
 
     private async Task HandleReplayBrowserCellClickAsync(DataGridViewCellEventArgs e)
     {
-        if (_pendingReplayRangeSelectionIndex >= 0)
+        if (_ignoreReplayBrowserCellClick)
         {
-            CompletePendingReplayRangeSelection();
+            _ignoreReplayBrowserCellClick = false;
             return;
         }
 
@@ -1702,14 +1704,9 @@ public partial class FortniteReplayAnalyzer : Form
 
         if (e.Button == MouseButtons.Left)
         {
-            if ((ModifierKeys & Keys.Shift) == Keys.Shift)
-            {
-                _ignoreReplaySelectionChanged = true;
-                _pendingReplayRangeSelectionIndex = e.RowIndex;
-                return;
-            }
-
-            _replaySelectionAnchorIndex = e.RowIndex;
+            _isReplayDragSelecting = true;
+            _replayDragSelectionChanged = false;
+            _replayDragStartIndex = e.RowIndex;
             return;
         }
 
@@ -1719,8 +1716,45 @@ public partial class FortniteReplayAnalyzer : Form
         }
     }
 
+    private void HandleReplayBrowserCellMouseEnter(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (!_isReplayDragSelecting || e.RowIndex < 0 || e.RowIndex >= dgvReplayBrowser.Rows.Count)
+        {
+            return;
+        }
+
+        if ((Control.MouseButtons & MouseButtons.Left) != MouseButtons.Left || _replayDragStartIndex < 0)
+        {
+            return;
+        }
+
+        if (e.RowIndex == _replayDragStartIndex && !_replayDragSelectionChanged)
+        {
+            return;
+        }
+
+        _ignoreReplaySelectionChanged = true;
+        _replayDragSelectionChanged = true;
+        SelectReplayDragRange(e.RowIndex);
+    }
+
     private void HandleReplayBrowserCellMouseUp(object? sender, DataGridViewCellMouseEventArgs e)
     {
+        if (e.Button != MouseButtons.Left)
+        {
+            return;
+        }
+
+        _isReplayDragSelecting = false;
+        _replayDragStartIndex = -1;
+
+        if (_replayDragSelectionChanged)
+        {
+            _ignoreReplayBrowserCellClick = true;
+            _ignoreReplaySelectionChanged = false;
+            dgvReplayBrowser.CurrentCell = null;
+            _replayDragSelectionChanged = false;
+        }
     }
 
     private ReplayBrowserRow? GetReplayRowForContextMenu()
@@ -1928,16 +1962,10 @@ public partial class FortniteReplayAnalyzer : Form
         e.SuppressKeyPress = true;
     }
 
-    private void ApplyReplayRangeSelection(int clickedRowIndex)
+    private void SelectReplayDragRange(int hoveredRowIndex)
     {
-        var anchorIndex = _selectedReplayRow is not null
-            ? _replayRows.IndexOf(_selectedReplayRow)
-            : _replaySelectionAnchorIndex >= 0
-                ? _replaySelectionAnchorIndex
-                : dgvReplayBrowser.CurrentRow?.Index ?? clickedRowIndex;
-
-        var start = Math.Min(anchorIndex, clickedRowIndex);
-        var end = Math.Max(anchorIndex, clickedRowIndex);
+        var start = Math.Min(_replayDragStartIndex, hoveredRowIndex);
+        var end = Math.Max(_replayDragStartIndex, hoveredRowIndex);
 
         _suppressReplaySelectionChanged = true;
         try
@@ -1951,26 +1979,6 @@ public partial class FortniteReplayAnalyzer : Form
         finally
         {
             _suppressReplaySelectionChanged = false;
-        }
-    }
-
-    private void CompletePendingReplayRangeSelection()
-    {
-        if (_pendingReplayRangeSelectionIndex < 0)
-        {
-            _ignoreReplaySelectionChanged = false;
-            return;
-        }
-
-        try
-        {
-            ApplyReplayRangeSelection(_pendingReplayRangeSelectionIndex);
-            dgvReplayBrowser.CurrentCell = null;
-        }
-        finally
-        {
-            _pendingReplayRangeSelectionIndex = -1;
-            _ignoreReplaySelectionChanged = false;
         }
     }
 
