@@ -69,6 +69,7 @@ public partial class FortniteReplayAnalyzer : Form
     private int _replaySelectionAnchorIndex = -1;
     private bool _ignoreReplayBrowserCellClick;
     private bool _ignoreReplaySelectionChanged;
+    private int _pendingReplayRangeSelectionIndex = -1;
 
     private string ReplayFolder => string.IsNullOrWhiteSpace(_settings.DefaultReplaysFolder) ? DefaultReplayFolder : _settings.DefaultReplaysFolder;
 
@@ -632,8 +633,6 @@ public partial class FortniteReplayAnalyzer : Form
         if (_ignoreReplayBrowserCellClick)
         {
             _ignoreReplayBrowserCellClick = false;
-            _ignoreReplaySelectionChanged = false;
-            RestoreReplayBrowserCurrentRow();
             return;
         }
 
@@ -1705,8 +1704,9 @@ public partial class FortniteReplayAnalyzer : Form
             if ((ModifierKeys & Keys.Shift) == Keys.Shift)
             {
                 _ignoreReplaySelectionChanged = true;
-                ApplyReplayRangeSelection(e.RowIndex);
+                _pendingReplayRangeSelectionIndex = e.RowIndex;
                 _ignoreReplayBrowserCellClick = true;
+                BeginInvoke(new Action(CompletePendingReplayRangeSelection));
                 return;
             }
 
@@ -1946,6 +1946,26 @@ public partial class FortniteReplayAnalyzer : Form
         finally
         {
             _suppressReplaySelectionChanged = false;
+        }
+    }
+
+    private void CompletePendingReplayRangeSelection()
+    {
+        if (_pendingReplayRangeSelectionIndex < 0)
+        {
+            _ignoreReplaySelectionChanged = false;
+            return;
+        }
+
+        try
+        {
+            ApplyReplayRangeSelection(_pendingReplayRangeSelectionIndex);
+            dgvReplayBrowser.CurrentCell = null;
+        }
+        finally
+        {
+            _pendingReplayRangeSelectionIndex = -1;
+            _ignoreReplaySelectionChanged = false;
         }
     }
 
