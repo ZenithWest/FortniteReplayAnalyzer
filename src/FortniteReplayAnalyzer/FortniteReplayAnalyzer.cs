@@ -631,9 +631,9 @@ public partial class FortniteReplayAnalyzer : Form
 
     private async Task HandleReplayBrowserCellClickAsync(DataGridViewCellEventArgs e)
     {
-        if (_ignoreReplayBrowserCellClick)
+        if (_pendingReplayRangeSelectionIndex >= 0)
         {
-            _ignoreReplayBrowserCellClick = false;
+            CompletePendingReplayRangeSelection();
             return;
         }
 
@@ -1706,7 +1706,6 @@ public partial class FortniteReplayAnalyzer : Form
             {
                 _ignoreReplaySelectionChanged = true;
                 _pendingReplayRangeSelectionIndex = e.RowIndex;
-                _ignoreReplayBrowserCellClick = true;
                 return;
             }
 
@@ -1722,12 +1721,6 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void HandleReplayBrowserCellMouseUp(object? sender, DataGridViewCellMouseEventArgs e)
     {
-        if (e.Button != MouseButtons.Left || _pendingReplayRangeSelectionIndex < 0)
-        {
-            return;
-        }
-
-        BeginInvoke(new Action(CompletePendingReplayRangeSelection));
     }
 
     private ReplayBrowserRow? GetReplayRowForContextMenu()
