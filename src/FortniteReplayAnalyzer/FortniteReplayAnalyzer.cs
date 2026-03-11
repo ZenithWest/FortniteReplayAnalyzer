@@ -1966,7 +1966,24 @@ public partial class FortniteReplayAnalyzer : Form
             return;
         }
 
-        dgvReplayBrowser.CurrentCell = dgvReplayBrowser.Rows[selectedIndex].Cells[0];
+        var row = dgvReplayBrowser.Rows[selectedIndex];
+        if (row.Cells.Count == 0)
+        {
+            dgvReplayBrowser.CurrentCell = null;
+            return;
+        }
+
+        var firstVisibleColumn = dgvReplayBrowser.Columns
+            .Cast<DataGridViewColumn>()
+            .FirstOrDefault(column => column.Visible);
+
+        if (firstVisibleColumn is null || firstVisibleColumn.Index < 0 || firstVisibleColumn.Index >= row.Cells.Count)
+        {
+            dgvReplayBrowser.CurrentCell = null;
+            return;
+        }
+
+        dgvReplayBrowser.CurrentCell = row.Cells[firstVisibleColumn.Index];
     }
 
     private void StopReplayLoad(ReplayBrowserRow row)
