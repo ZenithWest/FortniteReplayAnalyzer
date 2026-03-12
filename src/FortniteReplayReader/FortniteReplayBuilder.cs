@@ -802,20 +802,34 @@ public class FortniteReplayBuilder
             TryGetPlayerDataFromActor(actorId, out instigator);
         }
 
-        var usesNonPlayerTarget = damageCues.NonPlayerHitActor.HasValue
+        PlayerData? target = null;
+        uint? targetActor = damageCues.HitActor;
+        if (targetActor.HasValue)
+        {
+            TryGetPlayerDataFromActor(targetActor.Value, out target);
+        }
+
+        var hasNonPlayerPayload = damageCues.NonPlayerHitActor.HasValue
             && (damageCues.NonPlayerMagnitude.HasValue
                 || damageCues.NonPlayerLocation != null
                 || damageCues.NonPlayerNormal != null
                 || damageCues.NonPlayerbIsFatal.HasValue
                 || damageCues.NonPlayerbIsCritical.HasValue);
 
-        var targetActor = usesNonPlayerTarget
-            ? damageCues.NonPlayerHitActor
-            : damageCues.HitActor ?? damageCues.NonPlayerHitActor;
-        PlayerData? target = null;
-        if (targetActor.HasValue)
+        var usesNonPlayerTarget = false;
+        if (target is null && hasNonPlayerPayload)
         {
-            TryGetPlayerDataFromActor(targetActor.Value, out target);
+            targetActor = damageCues.NonPlayerHitActor;
+            usesNonPlayerTarget = targetActor.HasValue;
+        }
+        else if (!targetActor.HasValue)
+        {
+            targetActor = damageCues.NonPlayerHitActor;
+            if (targetActor.HasValue)
+            {
+                TryGetPlayerDataFromActor(targetActor.Value, out target);
+                usesNonPlayerTarget = target is null;
+            }
         }
 
         var weapon = ResolveWeapon(instigator);
