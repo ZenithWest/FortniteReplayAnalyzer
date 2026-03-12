@@ -593,11 +593,10 @@ public partial class FortniteReplayAnalyzer
             .ToList();
     }
 
-    private List<ReplayWeaponStatsSnapshot> BuildWeaponStatsSnapshotsForReplay(ReplayBrowserRow row)
+    private List<ReplayWeaponStatsSnapshot> BuildWeaponStatsSnapshotsForReplay(FortniteReplay replay, string matchKey)
     {
-        var replay = row.Replay;
-        var owner = replay is null ? null : GetReplayOwner(replay);
-        if (replay is null || owner is null)
+        var owner = GetReplayOwner(replay);
+        if (owner is null)
         {
             return [];
         }
@@ -615,7 +614,7 @@ public partial class FortniteReplayAnalyzer
             }
 
             var accumulator = GetOrCreateWeaponAccumulator(accumulators, weaponType, weaponName);
-            accumulator.MatchKeys.Add(row.FilePath);
+            accumulator.MatchKeys.Add(matchKey);
             accumulator.Hits++;
             accumulator.TotalDamage += evt.Magnitude ?? 0F;
 
@@ -664,7 +663,7 @@ public partial class FortniteReplayAnalyzer
             }
 
             var accumulator = GetOrCreateWeaponAccumulator(accumulators, weaponLabel, weaponLabel);
-            accumulator.MatchKeys.Add(row.FilePath);
+            accumulator.MatchKeys.Add(matchKey);
 
             if (entry.IsDowned || IsDirectKillWithoutDown(replay, entry))
             {

@@ -623,6 +623,12 @@ public partial class FortniteReplayAnalyzer : Form
         _selectedReplayRow = row;
 
         var requiredMode = ParseMode.Full;
+        if (row.IsLoading || row.IsQueued)
+        {
+            DisplayReplay(row);
+            return;
+        }
+
         if (row.Replay is null || row.LoadedParseMode < requiredMode)
         {
             await EnsureReplayLoadedAsync(row, requiredMode, updateSelectionView: true);
@@ -746,9 +752,16 @@ public partial class FortniteReplayAnalyzer : Form
                 }
             }
 
+            var weaponStatsSnapshots = await Task.Run(() => BuildWeaponStatsSnapshotsForReplay(replay, row.FilePath));
+            if (row.StopRequested)
+            {
+                MarkReplayAsStopped(row, updateSelectionView: false);
+                return;
+            }
+
             ApplyReplaySummary(row, replay);
             row.Replay = replay;
-            row.WeaponStatsSnapshots = BuildWeaponStatsSnapshotsForReplay(row);
+            row.WeaponStatsSnapshots = weaponStatsSnapshots;
             row.Status = parseMode == ParseMode.Full ? $"Ready ({replay.DamageEvents.Count} hits)" : "Ready";
             row.SummaryLoaded = true;
             row.LoadedParseMode = parseMode;
