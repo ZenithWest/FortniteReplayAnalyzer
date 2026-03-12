@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Unreal.Core.Models;
 using Unreal.Core.Models.Enums;
@@ -78,18 +79,26 @@ public class BitReader : FBitArchive
 
     public override bool CanRead(int count) => Position + count <= LastBit;
 
-    public override bool PeekBit() => (Buffer.Span[CurrentByte] & (1 << (Position & 7))) > 0;
+    public override bool PeekBit()
+    {
+        var position = Position;
+        var span = Buffer.Span;
+        return (span[position >> 3] & (1 << (position & 7))) != 0;
+    }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override bool ReadBit()
     {
-        if (AtEnd() || IsError)
+        var position = Position;
+        if (position >= LastBit || IsError)
         {
             IsError = true;
             return false;
         }
 
-        var result = (Buffer.Span[CurrentByte] & (1 << (Position & 7))) > 0;
-        Position++;
+        var span = Buffer.Span;
+        var result = (span[position >> 3] & (1 << (position & 7))) != 0;
+        Position = position + 1;
         return result;
     }
 
@@ -97,33 +106,34 @@ public class BitReader : FBitArchive
 
     public override int ReadBitsToInt(int bitCount)
     {
-        var result = new byte();
-        for (var i = 0; i < bitCount; i++)
-        {
-            if (IsError)
-            {
-                return 0;
-            }
-
-            if (ReadBit())
-            {
-                result |= (byte) (1 << i);
-            }
-        }
-        return result;
+        return (int)ReadBitsToLong(bitCount);
     }
 
     public override ulong ReadBitsToLong(int bitCount)
     {
-        var result = new ulong();
-        for (var i = 0; i < bitCount; i++)
+        if (bitCount < 0 || !CanRead(bitCount))
         {
-            if (ReadBit())
-            {
-                result |= (1UL << i);
-            }
+            IsError = true;
+            return 0;
         }
 
+        ulong result = 0;
+        var bitsWritten = 0;
+        var position = Position;
+        var span = Buffer.Span;
+
+        while (bitsWritten < bitCount)
+        {
+            var bitOffset = position & 7;
+            var bitsToRead = Math.Min(bitCount - bitsWritten, 8 - bitOffset);
+            var mask = (1 << bitsToRead) - 1;
+            var chunk = (span[position >> 3] >> bitOffset) & mask;
+            result |= (ulong)chunk << bitsWritten;
+            position += bitsToRead;
+            bitsWritten += bitsToRead;
+        }
+
+        Position = position;
         return result;
     }
 

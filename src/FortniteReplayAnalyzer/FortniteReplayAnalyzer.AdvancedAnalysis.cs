@@ -834,29 +834,42 @@ public partial class FortniteReplayAnalyzer
 
     private string? InferWeaponLabelFromNearbyKillFeed(FortniteReplay replay, DamageEvent evt)
     {
+        var weaponCues = GetKillFeedWeaponCues(replay);
         var eventTime = GetDamageTime(evt);
         var instigatorKey = evt.InstigatorName;
         var targetKey = evt.TargetName;
+        string? bestReason = null;
+        var bestDistance = double.MaxValue;
 
-        return replay.KillFeed
-            .Where(entry => !entry.IsRevived)
-            .Select(entry => new
+        foreach (var cue in weaponCues)
+        {
+            var actorMatches =
+                (!string.IsNullOrWhiteSpace(cue.ActorLookupKey) && string.Equals(cue.ActorLookupKey, instigatorKey, StringComparison.OrdinalIgnoreCase))
+                || (evt.InstigatorId.HasValue && cue.ActorId == evt.InstigatorId);
+            if (!actorMatches)
             {
-                Entry = entry,
-                Actor = ResolveKillFeedActorReference(replay, entry),
-                Target = FindPlayer(replay, entry.PlayerId, entry.PlayerName),
-                Reason = FormatKillFeedReason(replay, entry)
-            })
-            .Where(x => !string.IsNullOrWhiteSpace(x.Reason) && x.Reason != "-")
-            .Where(x =>
-                (string.Equals(x.Actor.LookupKey, instigatorKey, StringComparison.OrdinalIgnoreCase)
-                 || (evt.InstigatorId.HasValue && x.Actor.Player?.Id == evt.InstigatorId))
-                && ((x.Target is not null && string.Equals(x.Target.PlayerId, targetKey, StringComparison.OrdinalIgnoreCase))
-                    || (evt.TargetId.HasValue && x.Target?.Id == evt.TargetId)
-                    || MatchesKillFeedTarget(x.Entry, evt.TargetId, targetKey)))
-            .OrderBy(x => Math.Abs(GetKillFeedTime(x.Entry) - eventTime))
-            .Select(x => NormalizeKillReasonToWeaponLabel(x.Reason))
-            .FirstOrDefault(reason => !string.IsNullOrWhiteSpace(reason));
+                continue;
+            }
+
+            var targetMatches =
+                (!string.IsNullOrWhiteSpace(cue.TargetLookupKey) && string.Equals(cue.TargetLookupKey, targetKey, StringComparison.OrdinalIgnoreCase))
+                || (evt.TargetId.HasValue && cue.TargetId == evt.TargetId);
+            if (!targetMatches)
+            {
+                continue;
+            }
+
+            var distance = Math.Abs(cue.TimeValue - eventTime);
+            if (distance >= bestDistance)
+            {
+                continue;
+            }
+
+            bestDistance = distance;
+            bestReason = cue.WeaponLabel;
+        }
+
+        return bestReason;
     }
 
     private static string? NormalizeKillReasonToWeaponLabel(string? reason)
@@ -1069,7 +1082,7 @@ public partial class FortniteReplayAnalyzer
         }
     }
 
-    private static int CountReplayEliminations(FortniteReplay replay, PlayerData owner, bool includeBotKills)
+    private int CountReplayEliminations(FortniteReplay replay, PlayerData owner, bool includeBotKills)
     {
         return replay.KillFeed
             .Where(entry => MatchesResolvedKillFeedActor(replay, owner, entry) && !entry.IsRevived && !entry.IsDowned)

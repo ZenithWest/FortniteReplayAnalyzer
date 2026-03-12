@@ -1,6 +1,7 @@
 using FortniteReplayReader;
 using FortniteReplayReader.Models;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using Unreal.Core.Exceptions;
 using Unreal.Core.Models.Enums;
 
@@ -24,6 +25,7 @@ public partial class FortniteReplayAnalyzer : Form
     private readonly Dictionary<string, int> _replayBrowserColumnWidths = new(StringComparer.Ordinal);
     private readonly Queue<ReplayBrowserRow> _pendingReplayLoads = new();
     private readonly HashSet<string> _pendingReplayLoadPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConditionalWeakTable<FortniteReplay, ReplayLookupCache> _replayLookupCaches = new();
 
     private string _replaySortColumn = nameof(ReplayBrowserRow.RecordedAt);
     private bool _replaySortAscending;
@@ -72,6 +74,7 @@ public partial class FortniteReplayAnalyzer : Form
     private bool _isReplayDragSelecting;
     private bool _replayDragSelectionChanged;
     private int _replayDragStartIndex = -1;
+    private bool _replayRowsRefreshPending;
 
     private string ReplayFolder => string.IsNullOrWhiteSpace(_settings.DefaultReplaysFolder) ? DefaultReplayFolder : _settings.DefaultReplaysFolder;
 
@@ -703,7 +706,7 @@ public partial class FortniteReplayAnalyzer : Form
         _pendingReplayLoadPaths.Remove(row.FilePath);
         row.IsLoading = true;
         row.Status = parseMode == ParseMode.Full ? "Loading full replay..." : "Loading summary...";
-        BindReplayRows();
+        RequestReplayRowsRefresh();
         DebugOutputWriter.LogInfo($"Parsing replay '{row.FileName}' with mode {parseMode}.");
 
         try
@@ -780,7 +783,7 @@ public partial class FortniteReplayAnalyzer : Form
         finally
         {
             row.IsLoading = false;
-            BindReplayRows();
+            RequestReplayRowsRefresh();
 
             if (updateSelectionView && row.Replay is not null && row == _selectedReplayRow)
             {
@@ -880,6 +883,73 @@ public partial class FortniteReplayAnalyzer : Form
         }
 
         row.ViewCache = BuildReplayViewCache(row, row.Replay);
+    }
+
+    private void RequestReplayRowsRefresh()
+    {
+        if (_replayRowsRefreshPending)
+        {
+            return;
+        }
+
+        _replayRowsRefreshPending = true;
+        if (!IsHandleCreated)
+        {
+            _replayRowsRefreshPending = false;
+            BindReplayRows();
+            return;
+        }
+
+        BeginInvoke((Action)(() =>
+        {
+            _replayRowsRefreshPending = false;
+            if (!IsDisposed)
+            {
+                BindReplayRows();
+            }
+        }));
+    }
+
+    private ReplayLookupCache GetReplayLookupCache(FortniteReplay replay)
+    {
+        return _replayLookupCaches.GetValue(replay, static replayValue => ReplayLookupCache.Create(replayValue));
+    }
+
+    private List<KillFeedWeaponCue> GetKillFeedWeaponCues(FortniteReplay replay)
+    {
+        var lookupCache = GetReplayLookupCache(replay);
+        if (lookupCache.KillFeedWeaponCues.Count > 0)
+        {
+            return lookupCache.KillFeedWeaponCues;
+        }
+
+        foreach (var entry in replay.KillFeed)
+        {
+            if (entry.IsRevived)
+            {
+                continue;
+            }
+
+            var reason = NormalizeKillReasonToWeaponLabel(FormatKillFeedReason(replay, entry));
+            if (string.IsNullOrWhiteSpace(reason))
+            {
+                continue;
+            }
+
+            var actor = ResolveKillFeedActorReference(replay, entry);
+            var target = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
+            lookupCache.KillFeedWeaponCues.Add(new KillFeedWeaponCue
+            {
+                ActorId = actor.NumericId,
+                ActorLookupKey = actor.Player?.PlayerId ?? actor.LookupKey,
+                TargetId = target?.Id ?? entry.PlayerId,
+                TargetLookupKey = target?.PlayerId ?? entry.PlayerName,
+                TimeValue = GetKillFeedTime(entry),
+                WeaponLabel = reason
+            });
+        }
+
+        return lookupCache.KillFeedWeaponCues;
     }
 
     private static PlayerData? ResolveDefaultPlayer(FortniteReplay replay)
@@ -1610,11 +1680,20 @@ public partial class FortniteReplayAnalyzer : Form
     }
     private static PlayerData? GetReplayOwner(FortniteReplay replay) => replay.PlayerData?.FirstOrDefault(player => player.IsReplayOwner);
 
-    private static PlayerData? FindPlayer(FortniteReplay replay, int? playerId, string? playerLookupKey)
+    private PlayerData? FindPlayer(FortniteReplay replay, int? playerId, string? playerLookupKey)
     {
-        return replay.PlayerData?.FirstOrDefault(player =>
-            (playerId.HasValue && player.Id == playerId)
-            || (!string.IsNullOrWhiteSpace(playerLookupKey) && string.Equals(player.PlayerId, playerLookupKey, StringComparison.OrdinalIgnoreCase)));
+        var lookupCache = GetReplayLookupCache(replay);
+        if (playerId.HasValue && lookupCache.PlayersById.TryGetValue(playerId.Value, out var playerById))
+        {
+            return playerById;
+        }
+
+        if (!string.IsNullOrWhiteSpace(playerLookupKey) && lookupCache.PlayersByLookupKey.TryGetValue(playerLookupKey, out var playerByKey))
+        {
+            return playerByKey;
+        }
+
+        return null;
     }
 
     private static bool MatchesPlayer(PlayerData player, int? playerId, string? playerLookupKey)
@@ -1637,32 +1716,46 @@ public partial class FortniteReplayAnalyzer : Form
         return !string.IsNullOrWhiteSpace(playerLookupKey) && string.Equals(entry.PlayerName, playerLookupKey, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool MatchesResolvedKillFeedActor(FortniteReplay replay, PlayerData player, KillFeedEntry entry)
+    private bool MatchesResolvedKillFeedActor(FortniteReplay replay, PlayerData player, KillFeedEntry entry)
     {
         var actorReference = ResolveKillFeedActorReference(replay, entry);
         return MatchesPlayer(player, actorReference.NumericId, actorReference.LookupKey);
     }
 
-    private static (PlayerData? Player, int? NumericId, string? LookupKey) ResolveKillFeedActorReference(FortniteReplay replay, KillFeedEntry entry)
+    private (PlayerData? Player, int? NumericId, string? LookupKey) ResolveKillFeedActorReference(FortniteReplay replay, KillFeedEntry entry)
     {
+        var lookupCache = GetReplayLookupCache(replay);
+        if (lookupCache.ResolvedActorCache.TryGetValue(entry, out var cachedReference))
+        {
+            return cachedReference;
+        }
+
         var directActor = FindPlayer(replay, entry.FinisherOrDowner, entry.FinisherOrDownerName);
         if (directActor is not null || entry.FinisherOrDowner.HasValue || !string.IsNullOrWhiteSpace(entry.FinisherOrDownerName))
         {
-            return (directActor, directActor?.Id ?? entry.FinisherOrDowner, directActor?.PlayerId ?? entry.FinisherOrDownerName);
+            var resolved = (directActor, directActor?.Id ?? entry.FinisherOrDowner, directActor?.PlayerId ?? entry.FinisherOrDownerName);
+            lookupCache.ResolvedActorCache[entry] = resolved;
+            return resolved;
         }
 
         if (entry.IsDowned || entry.IsRevived)
         {
-            return (null, null, null);
+            const string? noLookupKey = null;
+            var empty = ((PlayerData?)null, (int?)null, noLookupKey);
+            lookupCache.ResolvedActorCache[entry] = empty;
+            return empty;
         }
 
         var currentTime = GetKillFeedTime(entry);
-        var priorEntries = replay.KillFeed
-            .Where(candidate => !ReferenceEquals(candidate, entry) && MatchesKillFeedTarget(candidate, entry.PlayerId, entry.PlayerName) && GetKillFeedTime(candidate) <= currentTime)
-            .OrderByDescending(GetKillFeedTime);
-
-        foreach (var priorEntry in priorEntries)
+        foreach (var priorEntry in lookupCache.KillFeedByDescendingTime)
         {
+            if (ReferenceEquals(priorEntry, entry)
+                || !MatchesKillFeedTarget(priorEntry, entry.PlayerId, entry.PlayerName)
+                || GetKillFeedTime(priorEntry) > currentTime)
+            {
+                continue;
+            }
+
             if (priorEntry.IsRevived)
             {
                 break;
@@ -1671,13 +1764,18 @@ public partial class FortniteReplayAnalyzer : Form
             if (priorEntry.IsDowned)
             {
                 var inferredActor = FindPlayer(replay, priorEntry.FinisherOrDowner, priorEntry.FinisherOrDownerName);
-                return (inferredActor, inferredActor?.Id ?? priorEntry.FinisherOrDowner, inferredActor?.PlayerId ?? priorEntry.FinisherOrDownerName);
+                var resolved = (inferredActor, inferredActor?.Id ?? priorEntry.FinisherOrDowner, inferredActor?.PlayerId ?? priorEntry.FinisherOrDownerName);
+                lookupCache.ResolvedActorCache[entry] = resolved;
+                return resolved;
             }
 
             break;
         }
 
-        return (null, null, null);
+        const string? unresolvedLookupKey = null;
+        var unresolved = ((PlayerData?)null, (int?)null, unresolvedLookupKey);
+        lookupCache.ResolvedActorCache[entry] = unresolved;
+        return unresolved;
     }
 
     private static string ResolveCombatantName(PlayerData? player, int? numericId, string? fallback = null, bool isBot = false)
@@ -2006,7 +2104,7 @@ public partial class FortniteReplayAnalyzer : Form
             _pendingReplayLoads.Enqueue(row);
         }
 
-        BindReplayRows();
+        RequestReplayRowsRefresh();
         lblReplayStatus.Text = $"{row.FileName} queued for loading.";
         _ = ProcessReplayLoadQueueAsync();
     }
@@ -2082,7 +2180,7 @@ public partial class FortniteReplayAnalyzer : Form
         row.LoadedParseMode = ParseMode.EventsOnly;
         row.Status = "Not loaded";
         CloseReplayTab(row);
-        BindReplayRows();
+        RequestReplayRowsRefresh();
 
         if (row == _selectedReplayRow)
         {
@@ -2285,7 +2383,7 @@ public partial class FortniteReplayAnalyzer : Form
 
         row.StopRequested = true;
         row.Status = "Stopping...";
-        BindReplayRows();
+        RequestReplayRowsRefresh();
         if (row == _selectedReplayRow)
         {
             lblReplayStatus.Text = $"Stopping {row.FileName}...";
@@ -2315,7 +2413,7 @@ public partial class FortniteReplayAnalyzer : Form
         row.Replay = null;
         row.LoadedParseMode = ParseMode.EventsOnly;
         row.Status = "Stopped";
-        BindReplayRows();
+        RequestReplayRowsRefresh();
 
         if (updateSelectionView)
         {
@@ -2715,7 +2813,7 @@ public partial class FortniteReplayAnalyzer : Form
         tabControl.TabPages.Add(page);
     }
 
-    private static bool InvolvesReplayOwnerTeam(FortniteReplay replay, KillFeedEntry entry)
+    private bool InvolvesReplayOwnerTeam(FortniteReplay replay, KillFeedEntry entry)
     {
         var teamIndex = GetReplayOwner(replay)?.TeamIndex;
         if (!teamIndex.HasValue)
@@ -2727,7 +2825,7 @@ public partial class FortniteReplayAnalyzer : Form
         var target = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
         return actorReference.Player?.TeamIndex == teamIndex || target?.TeamIndex == teamIndex;
     }
-    private static bool InvolvesReplayOwnerTeam(FortniteReplay replay, DamageEvent evt)
+    private bool InvolvesReplayOwnerTeam(FortniteReplay replay, DamageEvent evt)
     {
         var teamIndex = GetReplayOwner(replay)?.TeamIndex;
         if (!teamIndex.HasValue)
@@ -2740,7 +2838,7 @@ public partial class FortniteReplayAnalyzer : Form
         return attacker?.TeamIndex == teamIndex || target?.TeamIndex == teamIndex;
     }
 
-    private static DamageTotals SummarizeDamage(FortniteReplay replay, IEnumerable<DamageEvent> events, bool targetPerspective)
+    private DamageTotals SummarizeDamage(FortniteReplay replay, IEnumerable<DamageEvent> events, bool targetPerspective)
     {
         var totals = new DamageTotals();
         foreach (var evt in events)
@@ -2775,7 +2873,7 @@ public partial class FortniteReplayAnalyzer : Form
         return totals;
     }
 
-    private static DamageParticipantCategory ClassifyDamageParticipant(FortniteReplay replay, int? numericId, string? lookupKey, bool isBot)
+    private DamageParticipantCategory ClassifyDamageParticipant(FortniteReplay replay, int? numericId, string? lookupKey, bool isBot)
     {
         var player = FindPlayer(replay, numericId, lookupKey);
         if (player is not null)
@@ -2831,7 +2929,7 @@ public partial class FortniteReplayAnalyzer : Form
 
     private static string GetKillFeedEventText(KillFeedEntry entry) => entry.IsRevived ? "Revived" : entry.IsDowned ? "Downed" : "Eliminated";
 
-    private static string FormatKillFeedReason(FortniteReplay replay, KillFeedEntry entry)
+    private string FormatKillFeedReason(FortniteReplay replay, KillFeedEntry entry)
     {
         var tags = entry.DeathTags?
             .Where(tag => !string.IsNullOrWhiteSpace(tag))
@@ -2868,7 +2966,7 @@ public partial class FortniteReplayAnalyzer : Form
         return "-";
     }
 
-    private static string? GetWeaponLabelFromMatchingElimination(FortniteReplay replay, KillFeedEntry entry)
+    private string? GetWeaponLabelFromMatchingElimination(FortniteReplay replay, KillFeedEntry entry)
     {
         var targetPlayer = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
         var actorReference = ResolveKillFeedActorReference(replay, entry);
@@ -3094,6 +3192,49 @@ public partial class FortniteReplayAnalyzer : Form
         public float Bots { get; set; }
         public float Npcs { get; set; }
         public float Structures { get; set; }
+    }
+
+    private sealed class ReplayLookupCache
+    {
+        public Dictionary<int, PlayerData> PlayersById { get; } = new();
+        public Dictionary<string, PlayerData> PlayersByLookupKey { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<KillFeedEntry, (PlayerData? Player, int? NumericId, string? LookupKey)> ResolvedActorCache { get; } = new();
+        public List<KillFeedEntry> KillFeedByDescendingTime { get; } = [];
+        public List<KillFeedWeaponCue> KillFeedWeaponCues { get; } = [];
+
+        public static ReplayLookupCache Create(FortniteReplay replay)
+        {
+            var cache = new ReplayLookupCache();
+
+            if (replay.PlayerData is not null)
+            {
+                foreach (var player in replay.PlayerData)
+                {
+                    if (player.Id.HasValue)
+                    {
+                        cache.PlayersById[player.Id.Value] = player;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(player.PlayerId))
+                    {
+                        cache.PlayersByLookupKey[player.PlayerId] = player;
+                    }
+                }
+            }
+
+            cache.KillFeedByDescendingTime.AddRange(replay.KillFeed.OrderByDescending(GetKillFeedTime));
+            return cache;
+        }
+    }
+
+    private sealed class KillFeedWeaponCue
+    {
+        public int? ActorId { get; init; }
+        public string? ActorLookupKey { get; init; }
+        public int? TargetId { get; init; }
+        public string? TargetLookupKey { get; init; }
+        public double TimeValue { get; init; }
+        public string WeaponLabel { get; init; } = string.Empty;
     }
 
     private sealed record ReplayLoadResult(FortniteReplay? Replay, Exception? Exception);
