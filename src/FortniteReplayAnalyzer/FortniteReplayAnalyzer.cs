@@ -144,23 +144,23 @@ public partial class FortniteReplayAnalyzer : Form
         var killFeedFilterPanel = CreateFilterFlowPanel();
         _chkTeamKillFeedOnly = CreateFilterCheckBox("Team members only", (_, _) =>
         {
-            if (_selectedReplayRow?.Replay is not null)
+            if (_selectedReplayRow is not null)
             {
-                BuildKillFeed(_selectedReplayRow.Replay);
+                BuildKillFeed(_selectedReplayRow);
             }
         });
         _chkKillFeedPlayers = CreateFilterCheckBox("Players", (_, _) =>
         {
-            if (_selectedReplayRow?.Replay is not null)
+            if (_selectedReplayRow is not null)
             {
-                BuildKillFeed(_selectedReplayRow.Replay);
+                BuildKillFeed(_selectedReplayRow);
             }
         }, true);
         _chkKillFeedBots = CreateFilterCheckBox("Bots", (_, _) =>
         {
-            if (_selectedReplayRow?.Replay is not null)
+            if (_selectedReplayRow is not null)
             {
-                BuildKillFeed(_selectedReplayRow.Replay);
+                BuildKillFeed(_selectedReplayRow);
             }
         }, true);
         killFeedFilterPanel.Controls.Add(_chkTeamKillFeedOnly);
@@ -866,9 +866,9 @@ public partial class FortniteReplayAnalyzer : Form
         lblPlayerPanelTitle.Text = "Player Stats";
 
         dgvGameStats.DataSource = row.ViewCache?.ReplayDetails ?? BuildReplayDetails(row).ToList();
-        BuildKillFeed(row.Replay);
-        BuildCombatEvents(row.Replay);
-        BuildPlayerList(row.Replay);
+        BuildKillFeed(row);
+        BuildCombatEvents(row);
+        BuildPlayerList(row);
 
         var defaultPlayer = ResolveDefaultPlayer(row.Replay);
         ShowPlayerDetails(defaultPlayer);
@@ -1002,6 +1002,8 @@ public partial class FortniteReplayAnalyzer : Form
 
     private PlayerViewCache BuildPlayerViewCache(FortniteReplay replay, PlayerData player)
     {
+        var profileIcon = GetPlayerSkinIcon(player);
+        var displayName = ResolvePlayerName(player, player.Id, player.PlayerId);
         var overviewRows = BuildPlayerOverview(replay, player).ToList();
         var killLogRows = replay.KillFeed
             .Where(entry => MatchesPlayer(player, entry.PlayerId, entry.PlayerName) || MatchesResolvedKillFeedActor(replay, player, entry))
@@ -1038,6 +1040,8 @@ public partial class FortniteReplayAnalyzer : Form
         {
             Player = player,
             CacheKey = GetPlayerCacheKey(player),
+            ProfileIcon = profileIcon,
+            DisplayName = displayName,
             OverviewRows = overviewRows,
             KillLogRows = killLogRows,
             VictimRows = victimRows,
@@ -1080,22 +1084,18 @@ public partial class FortniteReplayAnalyzer : Form
         yield return new DetailRow("Recorded Hits", replay.DamageEvents.Count.ToString(CultureInfo.CurrentCulture));
     }
 
-    private void BuildKillFeed(FortniteReplay replay)
+    private void BuildKillFeed(ReplayBrowserRow row)
     {
-        dgvKillFeed.DataSource = replay.KillFeed
-            .Where(entry => !(_chkTeamKillFeedOnly?.Checked ?? false) || InvolvesReplayOwnerTeam(replay, entry))
-            .Where(entry => ShouldIncludeKillFeedEntry(replay, entry))
-            .Select(entry => CreateKillFeedRow(replay, entry))
-            .OrderBy(entry => entry.TimeValue)
+        var rows = row.ViewCache?.KillFeedRows ?? [];
+        dgvKillFeed.DataSource = rows
+            .Where(ShouldIncludeKillFeedRow)
             .ToList();
     }
 
-    private void BuildCombatEvents(FortniteReplay replay)
+    private void BuildCombatEvents(ReplayBrowserRow row)
     {
-        var rows = replay.DamageEvents
-            .Where(evt => ShouldIncludeReplayDamageEvent(replay, evt))
-            .Select(evt => CreateCombatEventRow(replay, evt))
-            .OrderBy(row => row.TimeValue)
+        var rows = (row.ViewCache?.CombatEventRows ?? [])
+            .Where(ShouldIncludeReplayDamageEventRow)
             .ToList();
 
         dgvCombatEvents.DataSource = rows;
@@ -1106,6 +1106,11 @@ public partial class FortniteReplayAnalyzer : Form
         var actorReference = ResolveKillFeedActorReference(replay, entry);
         var targetPlayer = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
         var timeValue = GetKillFeedTime(entry);
+        var ownerTeamIndex = GetReplayOwner(replay)?.TeamIndex;
+        var actorIsTeammate = ownerTeamIndex.HasValue && actorReference.Player?.TeamIndex == ownerTeamIndex;
+        var targetIsTeammate = ownerTeamIndex.HasValue && targetPlayer?.TeamIndex == ownerTeamIndex;
+        var actorIsBot = actorReference.Player?.IsBot ?? false;
+        var targetIsBot = targetPlayer?.IsBot ?? entry.PlayerIsBot;
 
         return new KillFeedRow
         {
@@ -1120,6 +1125,11 @@ public partial class FortniteReplayAnalyzer : Form
             TargetName = ResolvePlayerName(targetPlayer, entry.PlayerId, entry.PlayerName),
             TargetId = targetPlayer?.Id ?? entry.PlayerId,
             TargetLookupKey = targetPlayer?.PlayerId ?? entry.PlayerName,
+            ActorIsBot = actorIsBot,
+            TargetIsBot = targetIsBot,
+            ActorIsTeammate = actorIsTeammate,
+            TargetIsTeammate = targetIsTeammate,
+            InvolvesOwnerTeam = actorIsTeammate || targetIsTeammate,
             EventText = GetKillFeedEventText(entry),
             ReasonText = FormatKillFeedReason(replay, entry),
             DistanceText = FormatDistance(entry.Distance)
@@ -1131,6 +1141,11 @@ public partial class FortniteReplayAnalyzer : Form
         var attacker = FindPlayer(replay, evt.InstigatorId, evt.InstigatorName);
         var target = FindPlayer(replay, evt.TargetId, evt.TargetName);
         var timeValue = GetDamageTime(evt);
+        var attackerCategory = ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot);
+        var targetCategory = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
+        var ownerTeamIndex = GetReplayOwner(replay)?.TeamIndex;
+        var attackerIsTeammate = ownerTeamIndex.HasValue && attacker?.TeamIndex == ownerTeamIndex;
+        var targetIsTeammate = ownerTeamIndex.HasValue && target?.TeamIndex == ownerTeamIndex;
 
         return new CombatEventRow
         {
@@ -1144,6 +1159,9 @@ public partial class FortniteReplayAnalyzer : Form
             TargetName = ResolveCombatantName(target, evt.TargetId, evt.TargetName, evt.TargetIsBot),
             TargetId = target?.Id ?? evt.TargetId,
             TargetLookupKey = target?.PlayerId ?? evt.TargetName,
+            AttackerCategory = attackerCategory,
+            TargetCategory = targetCategory,
+            InvolvesOwnerTeam = attackerIsTeammate || targetIsTeammate,
             EventText = evt.EventTag ?? evt.EventSource ?? "-",
             DamageText = evt.Magnitude.HasValue ? evt.Magnitude.Value.ToString("0.#", CultureInfo.CurrentCulture) : "-",
             WeaponTypeText = FormatCombatEventWeaponType(replay, evt),
@@ -1176,23 +1194,10 @@ public partial class FortniteReplayAnalyzer : Form
         CosmeticIconCache.QueueBackgroundDownload(cosmeticId);
         return CosmeticIconCache.GetPlaceholderImage();
     }
-    private void BuildPlayerList(FortniteReplay replay)
+    private void BuildPlayerList(ReplayBrowserRow row)
     {
         _playerRows.Clear();
-        _playerRows.AddRange(replay.PlayerData.Select(player => new PlayerSummaryRow
-        {
-            Player = player,
-            ProfileIcon = GetPlayerSkinIcon(player),
-            DisplayName = ResolvePlayerName(player, player.Id, player.PlayerId),
-            Team = player.TeamIndex,
-            TeamText = FormatNullable(player.TeamIndex),
-            Placement = player.Placement,
-            PlacementText = FormatNullable(player.Placement),
-            Kills = player.Kills,
-            KillsText = FormatNullable(player.Kills),
-            Platform = string.IsNullOrWhiteSpace(player.Platform) ? "-" : player.Platform,
-            IsBot = player.IsBot
-        }));
+        _playerRows.AddRange(row.ViewCache?.PlayerRows ?? []);
 
         SortPlayerRows(_playerSortColumn, toggle: false);
     }
@@ -1273,7 +1278,7 @@ public partial class FortniteReplayAnalyzer : Form
     {
         _selectedPlayer = player;
 
-        if (_selectedReplayRow?.Replay is null || player is null)
+        if (_selectedReplayRow?.Replay is null || _selectedReplayRow.ViewCache is null || player is null)
         {
             lblSelectedPlayer.Text = "Select a player to inspect their stats.";
             dgvPlayerOverview.DataSource = new List<DetailRow>();
@@ -1287,18 +1292,23 @@ public partial class FortniteReplayAnalyzer : Form
             return;
         }
 
-        lblSelectedPlayer.Text = ResolvePlayerName(player, player.Id, player.PlayerId);
-        lblPlayerPanelTitle.Text = $"Player Stats - {ResolvePlayerName(player, player.Id, player.PlayerId)}";
+        var playerCache = GetPlayerViewCache(_selectedReplayRow.ViewCache, player);
+        var playerDisplayName = playerCache?.DisplayName ?? ResolvePlayerName(player, player.Id, player.PlayerId);
+
+        lblSelectedPlayer.Text = playerDisplayName;
+        lblPlayerPanelTitle.Text = $"Player Stats - {playerDisplayName}";
         if (_picSelectedPlayer is not null)
         {
-            _picSelectedPlayer.Image = GetPlayerSkinIcon(player) ?? CosmeticIconCache.GetPlaceholderImage();
+            _picSelectedPlayer.Image = playerCache?.ProfileIcon ?? GetPlayerSkinIcon(player) ?? CosmeticIconCache.GetPlaceholderImage();
         }
-        dgvPlayerOverview.DataSource = BuildPlayerOverview(_selectedReplayRow.Replay, player).ToList();
+        dgvPlayerOverview.DataSource = playerCache?.OverviewRows ?? BuildPlayerOverview(_selectedReplayRow.Replay, player).ToList();
         RefreshPlayerKillLog();
-        dgvPlayerVictims.DataSource = BuildPlayerVictimRows(_selectedReplayRow.Replay, player).ToList();
+        dgvPlayerVictims.DataSource = playerCache?.VictimRows ?? BuildPlayerVictimRows(_selectedReplayRow.Replay, player).ToList();
         if (_dgvPlayerDamageLog is not null)
         {
-            _dgvPlayerDamageLog.DataSource = BuildPlayerDamageRows(_selectedReplayRow.Replay, player).ToList();
+            _dgvPlayerDamageLog.DataSource = playerCache is null
+                ? BuildPlayerDamageRows(_selectedReplayRow.Replay, player).ToList()
+                : playerCache.DamageRows.Where(ShouldIncludePlayerDamageEventRow).ToList();
         }
     }
 
@@ -1358,13 +1368,16 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void RefreshPlayerKillLog()
     {
-        if (_selectedReplayRow?.Replay is null || _selectedPlayer is null)
+        if (_selectedReplayRow?.Replay is null || _selectedReplayRow.ViewCache is null || _selectedPlayer is null)
         {
             dgvPlayerCombatLog.DataSource = new List<KillFeedRow>();
             return;
         }
 
-        dgvPlayerCombatLog.DataSource = BuildPlayerCombatLog(_selectedReplayRow.Replay, _selectedPlayer).ToList();
+        var playerCache = GetPlayerViewCache(_selectedReplayRow.ViewCache, _selectedPlayer);
+        dgvPlayerCombatLog.DataSource = playerCache is null
+            ? BuildPlayerCombatLog(_selectedReplayRow.Replay, _selectedPlayer).ToList()
+            : playerCache.KillLogRows.Where(ShouldIncludePlayerKillLogRow).ToList();
     }
 
     private IEnumerable<PlayerVictimRow> BuildPlayerVictimRows(FortniteReplay replay, PlayerData player)
@@ -2574,12 +2587,86 @@ public partial class FortniteReplayAnalyzer : Form
     {
         if (_selectedReplayRow?.Replay is not null)
         {
-            BuildCombatEvents(_selectedReplayRow.Replay);
+            BuildCombatEvents(_selectedReplayRow);
             if (_selectedPlayer is not null && _dgvPlayerDamageLog is not null)
             {
-                _dgvPlayerDamageLog.DataSource = BuildPlayerDamageRows(_selectedReplayRow.Replay, _selectedPlayer).ToList();
+                var playerCache = _selectedReplayRow.ViewCache is null ? null : GetPlayerViewCache(_selectedReplayRow.ViewCache, _selectedPlayer);
+                _dgvPlayerDamageLog.DataSource = playerCache is null
+                    ? BuildPlayerDamageRows(_selectedReplayRow.Replay, _selectedPlayer).ToList()
+                    : playerCache.DamageRows.Where(ShouldIncludePlayerDamageEventRow).ToList();
             }
         }
+    }
+
+    private static PlayerViewCache? GetPlayerViewCache(ReplayViewCache viewCache, PlayerData player)
+    {
+        return viewCache.PlayerCaches.TryGetValue(GetPlayerCacheKey(player), out var playerCache)
+            ? playerCache
+            : null;
+    }
+
+    private bool ShouldIncludeKillFeedRow(KillFeedRow row)
+    {
+        if ((_chkTeamKillFeedOnly?.Checked ?? false) && !row.InvolvesOwnerTeam)
+        {
+            return false;
+        }
+
+        var playersEnabled = _chkKillFeedPlayers?.Checked ?? true;
+        var botsEnabled = _chkKillFeedBots?.Checked ?? true;
+        var teamOnly = _chkTeamKillFeedOnly?.Checked ?? false;
+        var hasBot = row.ActorIsBot || row.TargetIsBot;
+        var hasTeammate = row.ActorIsTeammate || row.TargetIsTeammate;
+
+        if (teamOnly && !hasTeammate)
+        {
+            return false;
+        }
+
+        if (teamOnly)
+        {
+            if (playersEnabled && botsEnabled) return true;
+            if (playersEnabled) return hasTeammate && !hasBot;
+            if (botsEnabled) return hasTeammate && hasBot;
+            return row.ActorIsTeammate && row.TargetIsTeammate;
+        }
+
+        if (playersEnabled && botsEnabled) return true;
+        if (playersEnabled) return !hasBot;
+        if (botsEnabled) return hasBot;
+        return false;
+    }
+
+    private bool ShouldIncludeReplayDamageEventRow(CombatEventRow row)
+    {
+        if ((_chkTeamDamageOnly?.Checked ?? false) && !row.InvolvesOwnerTeam)
+        {
+            return false;
+        }
+
+        return IsDamageCategoryEnabled(row.TargetCategory, _chkDamagePlayers, _chkDamageBots, _chkDamageStructures, _chkDamageNpcs);
+    }
+
+    private bool ShouldIncludePlayerDamageEventRow(CombatEventRow row)
+    {
+        var playerKey = _selectedPlayer is null ? null : GetPlayerCacheKey(_selectedPlayer);
+        var playerMatchesAttacker = !string.IsNullOrWhiteSpace(playerKey)
+            && string.Equals(row.AttackerLookupKey ?? row.AttackerId?.ToString(CultureInfo.InvariantCulture), playerKey, StringComparison.OrdinalIgnoreCase);
+
+        var category = playerMatchesAttacker ? row.TargetCategory : row.AttackerCategory;
+        return IsDamageCategoryEnabled(category, _chkPlayerDamagePlayers, _chkPlayerDamageBots, _chkPlayerDamageStructures, _chkPlayerDamageNpcs);
+    }
+
+    private bool ShouldIncludePlayerKillLogRow(KillFeedRow row)
+    {
+        var selectedPlayerKey = _selectedPlayer is null ? null : GetPlayerCacheKey(_selectedPlayer);
+        var selectedPlayerIsTarget = !string.IsNullOrWhiteSpace(selectedPlayerKey)
+            && string.Equals(row.TargetLookupKey ?? row.TargetId?.ToString(CultureInfo.InvariantCulture), selectedPlayerKey, StringComparison.OrdinalIgnoreCase);
+
+        var counterpartIsBot = selectedPlayerIsTarget ? row.ActorIsBot : row.TargetIsBot;
+        return counterpartIsBot
+            ? _chkPlayerKillLogBots?.Checked ?? true
+            : _chkPlayerKillLogPlayers?.Checked ?? true;
     }
 
     private bool ShouldIncludeReplayDamageEvent(FortniteReplay replay, DamageEvent evt)

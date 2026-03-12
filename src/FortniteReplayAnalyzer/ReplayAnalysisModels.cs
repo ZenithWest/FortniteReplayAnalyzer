@@ -143,6 +143,8 @@ internal sealed class PlayerViewCache
 {
     public required PlayerData Player { get; init; }
     public required string CacheKey { get; init; }
+    public Image? ProfileIcon { get; init; }
+    public required string DisplayName { get; init; }
     public required List<DetailRow> OverviewRows { get; init; }
     public required List<KillFeedRow> KillLogRows { get; init; }
     public required List<PlayerVictimRow> VictimRows { get; init; }
