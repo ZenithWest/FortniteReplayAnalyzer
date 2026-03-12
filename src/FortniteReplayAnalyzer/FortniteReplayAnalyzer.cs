@@ -10,6 +10,7 @@ public partial class FortniteReplayAnalyzer : Form
 {
     private const int ExpandedReplayPaneWidth = 720;
     private const int CollapsedReplayPaneWidth = 52;
+    private const int MaxParallelReplayLoads = 10;
 
     private static readonly string DefaultReplayFolder = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -747,6 +748,7 @@ public partial class FortniteReplayAnalyzer : Form
 
             ApplyReplaySummary(row, replay);
             row.Replay = replay;
+            row.WeaponStatsSnapshots = BuildWeaponStatsSnapshotsForReplay(row);
             row.Status = parseMode == ParseMode.Full ? $"Ready ({replay.DamageEvents.Count} hits)" : "Ready";
             row.SummaryLoaded = true;
             row.LoadedParseMode = parseMode;
@@ -784,6 +786,7 @@ public partial class FortniteReplayAnalyzer : Form
     private void ApplyReplayFailure(ReplayBrowserRow row, string status, Exception ex, ParseMode parseMode, bool updateSelectionView)
     {
         row.Replay = null;
+        row.WeaponStatsSnapshots = [];
         row.IsQueued = false;
         row.StopRequested = false;
         row.Status = status;
@@ -1232,6 +1235,12 @@ public partial class FortniteReplayAnalyzer : Form
         CaptureReplayBrowserColumnWidths();
 
         var currentPath = _selectedReplayRow?.FilePath;
+        var selectedPaths = dgvReplayBrowser.SelectedRows
+            .Cast<DataGridViewRow>()
+            .Select(gridRow => gridRow.DataBoundItem as ReplayBrowserRow)
+            .Where(row => row is not null)
+            .Select(row => row!.FilePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var currentScroll = dgvReplayBrowser.FirstDisplayedScrollingRowIndex;
         var ordered = OrderReplayRows().ToList();
 
@@ -1239,6 +1248,16 @@ public partial class FortniteReplayAnalyzer : Form
         dgvReplayBrowser.DataSource = ordered;
         RestoreReplayBrowserColumnWidths();
 
+        foreach (DataGridViewRow gridRow in dgvReplayBrowser.Rows)
+        {
+            if ((gridRow.DataBoundItem as ReplayBrowserRow)?.FilePath is string path
+                && selectedPaths.Contains(path))
+            {
+                gridRow.Selected = true;
+            }
+        }
+
+        var restoredCurrentCell = false;
         if (currentPath is not null)
         {
             foreach (DataGridViewRow gridRow in dgvReplayBrowser.Rows)
@@ -1246,10 +1265,20 @@ public partial class FortniteReplayAnalyzer : Form
                 if ((gridRow.DataBoundItem as ReplayBrowserRow)?.FilePath == currentPath)
                 {
                     gridRow.Selected = true;
-                    dgvReplayBrowser.CurrentCell = gridRow.Cells[0];
+                    if (dgvReplayBrowser.SelectedRows.Count <= 1 && gridRow.Cells.Count > 0)
+                    {
+                        dgvReplayBrowser.CurrentCell = gridRow.Cells[0];
+                        restoredCurrentCell = true;
+                    }
+
                     break;
                 }
             }
+        }
+
+        if (!restoredCurrentCell)
+        {
+            dgvReplayBrowser.CurrentCell = null;
         }
 
         if (currentScroll >= 0 && dgvReplayBrowser.Rows.Count > currentScroll)
@@ -1585,7 +1614,7 @@ public partial class FortniteReplayAnalyzer : Form
 
     private string FormatCombatEventWeaponType(FortniteReplay replay, DamageEvent evt)
     {
-        var label = FormatWeaponType(evt);
+        var label = GetMostSpecificWeaponLabel(evt) ?? FormatWeaponType(evt);
         if (!string.Equals(label, "Unknown", StringComparison.OrdinalIgnoreCase))
         {
             return label;
@@ -1604,7 +1633,7 @@ public partial class FortniteReplayAnalyzer : Form
             .Where(candidate => !ReferenceEquals(candidate, evt))
             .Where(candidate => candidate.InstigatorId == evt.InstigatorId && candidate.TargetId == evt.TargetId)
             .Where(candidate => Math.Abs(GetDamageTime(candidate) - eventTime) <= 2.5D)
-            .Select(FormatWeaponType)
+            .Select(candidate => GetMostSpecificWeaponLabel(candidate) ?? FormatWeaponType(candidate))
             .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate) && !string.Equals(candidate, "Unknown", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -1871,21 +1900,32 @@ public partial class FortniteReplayAnalyzer : Form
         {
             while (_pendingReplayLoads.Count > 0)
             {
-                var row = _pendingReplayLoads.Dequeue();
-                _pendingReplayLoadPaths.Remove(row.FilePath);
-
-                if (!row.IsQueued || row.StopRequested || IsReplayLoaded(row))
+                var batch = new List<Task>(MaxParallelReplayLoads);
+                while (_pendingReplayLoads.Count > 0 && batch.Count < MaxParallelReplayLoads)
                 {
-                    row.IsQueued = false;
-                    if (row.StopRequested)
+                    var row = _pendingReplayLoads.Dequeue();
+                    _pendingReplayLoadPaths.Remove(row.FilePath);
+
+                    if (!row.IsQueued || row.StopRequested || IsReplayLoaded(row))
                     {
-                        MarkReplayAsStopped(row, updateSelectionView: false);
+                        row.IsQueued = false;
+                        if (row.StopRequested)
+                        {
+                            MarkReplayAsStopped(row, updateSelectionView: false);
+                        }
+
+                        continue;
                     }
 
+                    batch.Add(LoadReplayRowAsync(row, row.QueuedParseMode, updateSelectionView: false));
+                }
+
+                if (batch.Count == 0)
+                {
                     continue;
                 }
 
-                await LoadReplayRowAsync(row, row.QueuedParseMode, updateSelectionView: false);
+                await Task.WhenAll(batch);
             }
         }
         finally
@@ -1915,6 +1955,7 @@ public partial class FortniteReplayAnalyzer : Form
         CancelQueuedReplayLoad(row, preserveStatus: false);
         row.StopRequested = false;
         row.Replay = null;
+        row.WeaponStatsSnapshots = [];
         row.LoadedParseMode = ParseMode.EventsOnly;
         row.Status = "Not loaded";
         CloseReplayTab(row);

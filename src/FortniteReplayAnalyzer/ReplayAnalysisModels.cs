@@ -19,6 +19,7 @@ internal sealed class ReplayBrowserRow
     public int PlayerCount { get; set; }
     public string PlayerCountText { get; set; } = "-";
     public FortniteReplay? Replay { get; set; }
+    public List<ReplayWeaponStatsSnapshot> WeaponStatsSnapshots { get; set; } = [];
     public string Status { get; set; } = "Not loaded";
     public bool IsLoading { get; set; }
     public bool IsQueued { get; set; }

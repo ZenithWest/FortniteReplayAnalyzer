@@ -27,6 +27,8 @@ public partial class FortniteReplayAnalyzer
     private Panel? _damageTimelinePanel;
     private Panel? _overallDamageTrendPanel;
     private Panel? _overallKillsTrendPanel;
+    private Panel? _weaponDamageSharePanel;
+    private Panel? _weaponKillSharePanel;
     private CheckBox? _chkTimelinePlayers;
     private CheckBox? _chkTimelineBots;
     private CheckBox? _chkTimelineTeam;
@@ -34,6 +36,13 @@ public partial class FortniteReplayAnalyzer
     private CheckBox? _chkOverallKillsIncludeBots;
     private List<(string Name, List<DamageTimelinePoint> Points)> _timelineSeries = [];
     private List<MatchTrendRow> _overallTrendRows = [];
+    private List<(RectangleF Bounds, string Text)> _timelineHitRegions = [];
+    private List<(RectangleF Bounds, string Text)> _overallDamageHitRegions = [];
+    private List<(RectangleF Bounds, string Text)> _overallKillsHitRegions = [];
+    private List<(RectangleF Bounds, string Text)> _weaponDamagePieHitRegions = [];
+    private List<(RectangleF Bounds, string Text)> _weaponKillPieHitRegions = [];
+    private List<WeaponStatsRow> _lastWeaponStatsRows = [];
+    private readonly ToolTip _graphToolTip = new();
 
     private void InitializeAdvancedAnalysisUi()
     {
@@ -62,12 +71,13 @@ public partial class FortniteReplayAnalyzer
             ColumnCount = 1,
             Dock = DockStyle.Fill,
             Padding = new Padding(12),
-            RowCount = 4
+            RowCount = 5
         };
         page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         page.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        page.RowStyles.Add(new RowStyle(SizeType.Absolute, 260F));
         page.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
         var filters = CreateFilterFlowPanel();
@@ -116,6 +126,41 @@ public partial class FortniteReplayAnalyzer
             Visible = false
         };
 
+        var pieChartsLayout = new TableLayoutPanel
+        {
+            ColumnCount = 2,
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty,
+            RowCount = 1
+        };
+        pieChartsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        pieChartsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        pieChartsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+        _weaponDamageSharePanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+        _weaponKillSharePanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
+        _weaponDamageSharePanel.Paint += (_, e) => PaintWeaponSharePieChart(
+            e.Graphics,
+            _weaponDamageSharePanel.ClientRectangle,
+            "Avg Damage Per Match Share",
+            _lastWeaponStatsRows.Where(row => row.AvgDamagePerMatch > 0F)
+                .Select(row => (row.WeaponName, (double)row.AvgDamagePerMatch))
+                .ToList(),
+            _weaponDamagePieHitRegions);
+        _weaponKillSharePanel.Paint += (_, e) => PaintWeaponSharePieChart(
+            e.Graphics,
+            _weaponKillSharePanel.ClientRectangle,
+            "Avg Kills/Downs Per Match Share",
+            _lastWeaponStatsRows.Where(row => row.AvgKillOrDownsPerMatch > 0F)
+                .Select(row => (row.WeaponName, (double)row.AvgKillOrDownsPerMatch))
+                .ToList(),
+            _weaponKillPieHitRegions);
+        _weaponDamageSharePanel.MouseMove += (_, e) => UpdateGraphToolTip(_weaponDamageSharePanel, _weaponDamagePieHitRegions, e.Location);
+        _weaponKillSharePanel.MouseMove += (_, e) => UpdateGraphToolTip(_weaponKillSharePanel, _weaponKillPieHitRegions, e.Location);
+        pieChartsLayout.Controls.Add(_weaponDamageSharePanel, 0, 0);
+        pieChartsLayout.Controls.Add(_weaponKillSharePanel, 1, 0);
+
         _dgvWeaponStats = new DataGridView { Name = "dgvWeaponStats" };
         ConfigureReadOnlyGrid(_dgvWeaponStats, fullRowSelect: true);
         _dgvWeaponStats.AutoGenerateColumns = false;
@@ -150,7 +195,8 @@ public partial class FortniteReplayAnalyzer
         page.Controls.Add(filters, 0, 0);
         page.Controls.Add(_lblWeaponStatsStatus, 0, 1);
         page.Controls.Add(_weaponStatsProgressBar, 0, 2);
-        page.Controls.Add(_dgvWeaponStats, 0, 3);
+        page.Controls.Add(pieChartsLayout, 0, 3);
+        page.Controls.Add(_dgvWeaponStats, 0, 4);
         return page;
     }
 
@@ -218,7 +264,9 @@ public partial class FortniteReplayAnalyzer
             _overallDamageTrendPanel.ClientRectangle,
             "Damage Per Match",
             _overallTrendRows.Select(row => ((double)row.DamageToPlayersAndBots, row.Label)).ToList(),
-            Color.FromArgb(52, 123, 220));
+            Color.FromArgb(52, 123, 220),
+            _overallDamageHitRegions);
+        _overallDamageTrendPanel.MouseMove += (_, e) => UpdateGraphToolTip(_overallDamageTrendPanel, _overallDamageHitRegions, e.Location);
 
         _overallKillsTrendPanel = new Panel
         {
@@ -230,7 +278,9 @@ public partial class FortniteReplayAnalyzer
             _overallKillsTrendPanel.ClientRectangle,
             "Kills Per Match",
             _overallTrendRows.Select(row => ((double)row.Kills, row.Label)).ToList(),
-            Color.FromArgb(244, 124, 32));
+            Color.FromArgb(244, 124, 32),
+            _overallKillsHitRegions);
+        _overallKillsTrendPanel.MouseMove += (_, e) => UpdateGraphToolTip(_overallKillsTrendPanel, _overallKillsHitRegions, e.Location);
 
         var content = new TableLayoutPanel
         {
@@ -285,6 +335,7 @@ public partial class FortniteReplayAnalyzer
             BackColor = Color.White
         };
         _damageTimelinePanel.Paint += (_, e) => PaintDamageTimeline(e.Graphics, _damageTimelinePanel.ClientRectangle);
+        _damageTimelinePanel.MouseMove += (_, e) => UpdateGraphToolTip(_damageTimelinePanel, _timelineHitRegions, e.Location);
 
         var layout = new TableLayoutPanel
         {
@@ -346,12 +397,18 @@ public partial class FortniteReplayAnalyzer
             }
 
             _dgvWeaponStats.DataSource = weaponRows;
+            _lastWeaponStatsRows = weaponRows;
+            _weaponDamageSharePanel?.Invalidate();
+            _weaponKillSharePanel?.Invalidate();
             _lblWeaponStatsStatus.Text = rows.Count == 0
                 ? "No loaded replays in range."
                 : $"Weapon stats built from {rows.Count} loaded replay(s).";
         }
         catch (OperationCanceledException)
         {
+            _lastWeaponStatsRows = [];
+            _weaponDamageSharePanel?.Invalidate();
+            _weaponKillSharePanel?.Invalidate();
             _lblWeaponStatsStatus.Text = "Weapon stats refresh stopped.";
         }
         finally
@@ -494,12 +551,8 @@ public partial class FortniteReplayAnalyzer
 
         for (var index = 0; index < rows.Count; index++)
         {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-
-            BuildWeaponStatsRowsForReplay(rows[index], includeBotDamage, accumulators);
+            cancellationToken.ThrowIfCancellationRequested();
+            MergeWeaponSnapshots(rows[index], includeBotDamage, accumulators);
             progress?.Report(index + 1);
         }
 
@@ -540,28 +593,20 @@ public partial class FortniteReplayAnalyzer
             .ToList();
     }
 
-    private void BuildWeaponStatsRowsForReplay(
-        ReplayBrowserRow row,
-        bool includeBotDamage,
-        IDictionary<(string WeaponType, string WeaponName), WeaponStatsAccumulator> accumulators)
+    private List<ReplayWeaponStatsSnapshot> BuildWeaponStatsSnapshotsForReplay(ReplayBrowserRow row)
     {
         var replay = row.Replay;
         var owner = replay is null ? null : GetReplayOwner(replay);
         if (replay is null || owner is null)
         {
-            return;
+            return [];
         }
 
-        var matchKey = row.FilePath;
+        var accumulators = new Dictionary<(string WeaponType, string WeaponName), WeaponStatsAccumulator>();
 
         foreach (var evt in replay.DamageEvents.Where(evt => IsDamageByPlayer(owner, evt)))
         {
             var category = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
-            if (!includeBotDamage && category == DamageParticipantCategory.Bot)
-            {
-                continue;
-            }
-
             var weaponType = GetWeaponStatsTypeLabel(replay, evt);
             var weaponName = GetWeaponStatsNameLabel(replay, evt);
             if (string.IsNullOrWhiteSpace(weaponType) || string.Equals(weaponType, "Unknown", StringComparison.OrdinalIgnoreCase))
@@ -570,7 +615,7 @@ public partial class FortniteReplayAnalyzer
             }
 
             var accumulator = GetOrCreateWeaponAccumulator(accumulators, weaponType, weaponName);
-            accumulator.MatchKeys.Add(matchKey);
+            accumulator.MatchKeys.Add(row.FilePath);
             accumulator.Hits++;
             accumulator.TotalDamage += evt.Magnitude ?? 0F;
 
@@ -612,12 +657,6 @@ public partial class FortniteReplayAnalyzer
 
         foreach (var entry in replay.KillFeed.Where(entry => MatchesResolvedKillFeedActor(replay, owner, entry) && !entry.IsRevived))
         {
-            var target = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
-            if (!includeBotDamage && (target?.IsBot ?? entry.PlayerIsBot))
-            {
-                continue;
-            }
-
             var weaponLabel = NormalizeKillReasonToWeaponLabel(FormatKillFeedReason(replay, entry));
             if (string.IsNullOrWhiteSpace(weaponLabel))
             {
@@ -625,7 +664,7 @@ public partial class FortniteReplayAnalyzer
             }
 
             var accumulator = GetOrCreateWeaponAccumulator(accumulators, weaponLabel, weaponLabel);
-            accumulator.MatchKeys.Add(matchKey);
+            accumulator.MatchKeys.Add(row.FilePath);
 
             if (entry.IsDowned || IsDirectKillWithoutDown(replay, entry))
             {
@@ -636,6 +675,58 @@ public partial class FortniteReplayAnalyzer
             {
                 accumulator.EliminationCount++;
             }
+        }
+
+        return accumulators.Values
+            .Select(accumulator => new ReplayWeaponStatsSnapshot
+            {
+                WeaponType = accumulator.WeaponType,
+                WeaponName = accumulator.WeaponName,
+                KillOrDownCount = accumulator.KillOrDownCount,
+                EliminationCount = accumulator.EliminationCount,
+                Hits = accumulator.Hits,
+                HitsToPlayers = accumulator.HitsToPlayers,
+                HitsToBots = accumulator.HitsToBots,
+                HitsToNpcs = accumulator.HitsToNpcs,
+                HitsToStructures = accumulator.HitsToStructures,
+                CriticalHits = accumulator.CriticalHits,
+                ShieldHits = accumulator.ShieldHits,
+                FatalHits = accumulator.FatalHits,
+                TotalDamage = accumulator.TotalDamage,
+                DamageToPlayers = accumulator.DamageToPlayers,
+                DamageToBots = accumulator.DamageToBots,
+                DamageToNpcs = accumulator.DamageToNpcs,
+                DamageToStructures = accumulator.DamageToStructures
+            })
+            .ToList();
+    }
+
+    private void MergeWeaponSnapshots(
+        ReplayBrowserRow row,
+        bool includeBotDamage,
+        IDictionary<(string WeaponType, string WeaponName), WeaponStatsAccumulator> accumulators)
+    {
+        foreach (var snapshot in row.WeaponStatsSnapshots)
+        {
+            var accumulator = GetOrCreateWeaponAccumulator(accumulators, snapshot.WeaponType, snapshot.WeaponName);
+            accumulator.MatchKeys.Add(row.FilePath);
+            accumulator.KillOrDownCount += snapshot.KillOrDownCount;
+            accumulator.EliminationCount += snapshot.EliminationCount;
+            accumulator.CriticalHits += snapshot.CriticalHits;
+            accumulator.ShieldHits += snapshot.ShieldHits;
+            accumulator.FatalHits += snapshot.FatalHits;
+
+            accumulator.Hits += snapshot.HitsToPlayers + snapshot.HitsToNpcs + snapshot.HitsToStructures + (includeBotDamage ? snapshot.HitsToBots : 0);
+            accumulator.HitsToPlayers += snapshot.HitsToPlayers;
+            accumulator.HitsToNpcs += snapshot.HitsToNpcs;
+            accumulator.HitsToStructures += snapshot.HitsToStructures;
+            accumulator.HitsToBots += includeBotDamage ? snapshot.HitsToBots : 0;
+
+            accumulator.TotalDamage += snapshot.DamageToPlayers + snapshot.DamageToNpcs + snapshot.DamageToStructures + (includeBotDamage ? snapshot.DamageToBots : 0F);
+            accumulator.DamageToPlayers += snapshot.DamageToPlayers;
+            accumulator.DamageToNpcs += snapshot.DamageToNpcs;
+            accumulator.DamageToStructures += snapshot.DamageToStructures;
+            accumulator.DamageToBots += includeBotDamage ? snapshot.DamageToBots : 0F;
         }
     }
 
@@ -662,7 +753,13 @@ public partial class FortniteReplayAnalyzer
 
     private string GetWeaponStatsTypeLabel(FortniteReplay replay, DamageEvent evt)
     {
-        var label = FormatWeaponType(evt);
+        var label = NormalizeWeaponTypeLabel(evt.WeaponType);
+        if (!string.Equals(label, "Unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            return label;
+        }
+
+        label = NormalizeWeaponCategory(GetWeaponStatsNameLabel(replay, evt));
         if (!string.Equals(label, "Unknown", StringComparison.OrdinalIgnoreCase))
         {
             return label;
@@ -674,10 +771,10 @@ public partial class FortniteReplayAnalyzer
 
     private string GetWeaponStatsNameLabel(FortniteReplay replay, DamageEvent evt)
     {
-        var displayName = NormalizeWeaponDisplayLabel(evt.WeaponName);
-        if (!string.IsNullOrWhiteSpace(displayName))
+        var specificName = GetMostSpecificWeaponLabel(evt);
+        if (!string.IsNullOrWhiteSpace(specificName))
         {
-            return displayName;
+            return specificName;
         }
 
         var inferred = InferWeaponLabelFromTags([evt.WeaponAssetName ?? string.Empty, evt.WeaponClassName ?? string.Empty]);
@@ -688,6 +785,52 @@ public partial class FortniteReplayAnalyzer
 
         var nearbyKillFeedWeapon = InferWeaponLabelFromNearbyKillFeed(replay, evt);
         return string.IsNullOrWhiteSpace(nearbyKillFeedWeapon) ? "Unknown" : nearbyKillFeedWeapon;
+    }
+
+    private static string NormalizeWeaponCategory(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "Unknown";
+        }
+
+        var normalized = value.Trim();
+        if (normalized.Contains("Shotgun", StringComparison.OrdinalIgnoreCase)) return "Shotgun";
+        if (normalized.Contains("SMG", StringComparison.OrdinalIgnoreCase) || normalized.Contains("Submachine", StringComparison.OrdinalIgnoreCase)) return "SMG";
+        if (normalized.Contains("Pistol", StringComparison.OrdinalIgnoreCase) || normalized.Contains("Revolver", StringComparison.OrdinalIgnoreCase)) return "Pistol";
+        if (normalized.Contains("Sniper", StringComparison.OrdinalIgnoreCase) || normalized.Contains("DMR", StringComparison.OrdinalIgnoreCase)) return "Sniper";
+        if (normalized.Contains("Rifle", StringComparison.OrdinalIgnoreCase) || normalized.Contains("Assault", StringComparison.OrdinalIgnoreCase) || normalized.Contains("AR", StringComparison.OrdinalIgnoreCase)) return "Assault Rifle";
+        if (normalized.Contains("Launcher", StringComparison.OrdinalIgnoreCase) || normalized.Contains("Rocket", StringComparison.OrdinalIgnoreCase)) return "Explosive";
+        return "Unknown";
+    }
+
+    private static string? GetMostSpecificWeaponLabel(DamageEvent evt)
+    {
+        foreach (var candidate in new[]
+                 {
+                     NormalizeWeaponDisplayLabel(evt.WeaponAssetName),
+                     NormalizeWeaponDisplayLabel(evt.WeaponClassName),
+                     NormalizeWeaponDisplayLabel(evt.WeaponName)
+                 })
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                continue;
+            }
+
+            if (!IsGenericWeaponLabel(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsGenericWeaponLabel(string value)
+    {
+        return NormalizeWeaponCategory(value) != "Unknown"
+               && value.Equals(NormalizeWeaponCategory(value), StringComparison.OrdinalIgnoreCase);
     }
 
     private string? InferWeaponLabelFromNearbyKillFeed(FortniteReplay replay, DamageEvent evt)
@@ -965,6 +1108,7 @@ public partial class FortniteReplayAnalyzer
 
     private void PaintDamageTimeline(Graphics graphics, Rectangle bounds)
     {
+        _timelineHitRegions = [];
         graphics.Clear(Color.White);
         using var axisPen = new Pen(Color.Silver, 1F);
         using var textBrush = new SolidBrush(Color.FromArgb(48, 56, 66));
@@ -1035,6 +1179,13 @@ public partial class FortniteReplayAnalyzer
                 {
                     graphics.DrawEllipse(linePen, points[0].X - 2, points[0].Y - 2, 4, 4);
                 }
+
+                for (var j = 0; j < points.Length; j++)
+                {
+                    var point = series.Points[j];
+                    var hitBounds = new RectangleF(points[j].X - 5F, points[j].Y - 5F, 10F, 10F);
+                    _timelineHitRegions.Add((hitBounds, $"{series.Name}\n{point.Damage:0.#} damage\n{FormatMatchClock(point.TimeValue)}"));
+                }
             }
             else
             {
@@ -1049,7 +1200,9 @@ public partial class FortniteReplayAnalyzer
                     var rectX = (float)(centerX + offset - (slotWidth / 2F));
                     var rectY = chartBounds.Bottom - height;
                     var rectWidth = (float)Math.Max(2F, slotWidth - 1F);
-                    graphics.FillRectangle(brush, new RectangleF(rectX, rectY, rectWidth, height));
+                    var barBounds = new RectangleF(rectX, rectY, rectWidth, Math.Max(2F, height));
+                    graphics.FillRectangle(brush, barBounds);
+                    _timelineHitRegions.Add((barBounds, $"{series.Name}\n{point.Damage:0.#} damage\n{FormatMatchClock(point.TimeValue)}"));
                 }
             }
 
@@ -1062,8 +1215,9 @@ public partial class FortniteReplayAnalyzer
         graphics.DrawString(axisLabel, font, textBrush, chartBounds.Left + (chartBounds.Width - axisLabelSize.Width) / 2F, bounds.Bottom - 20);
     }
 
-    private static void PaintOverallTrendChart(Graphics graphics, Rectangle bounds, string title, List<(double Value, string Label)> values, Color barColor)
+    private static void PaintOverallTrendChart(Graphics graphics, Rectangle bounds, string title, List<(double Value, string Label)> values, Color barColor, List<(RectangleF Bounds, string Text)> hitRegions)
     {
+        hitRegions.Clear();
         graphics.Clear(Color.White);
         using var axisPen = new Pen(Color.Silver, 1F);
         using var textBrush = new SolidBrush(Color.FromArgb(48, 56, 66));
@@ -1074,10 +1228,10 @@ public partial class FortniteReplayAnalyzer
 
         var chart = Rectangle.FromLTRB(bounds.Left + 52, bounds.Top + 24, bounds.Right - 18, bounds.Bottom - 56);
         graphics.DrawString(title, titleFont, textBrush, bounds.Left + 12, bounds.Top + 4);
-        PaintVerticalBarChart(graphics, chart, values, barBrush, axisPen, gridPen, textBrush, font);
+        PaintVerticalBarChart(graphics, chart, values, barBrush, axisPen, gridPen, textBrush, font, hitRegions);
     }
 
-    private static void PaintVerticalBarChart(Graphics graphics, Rectangle bounds, List<(double Value, string Label)> values, Brush barBrush, Pen axisPen, Pen gridPen, Brush textBrush, Font font)
+    private static void PaintVerticalBarChart(Graphics graphics, Rectangle bounds, List<(double Value, string Label)> values, Brush barBrush, Pen axisPen, Pen gridPen, Brush textBrush, Font font, List<(RectangleF Bounds, string Text)> hitRegions)
     {
         graphics.DrawRectangle(axisPen, bounds);
         if (values.Count == 0)
@@ -1103,7 +1257,9 @@ public partial class FortniteReplayAnalyzer
             var value = values[i];
             var x = bounds.Left + 8F + i * (barWidth + 8F);
             var barHeight = (float)(value.Value / maxValue) * (bounds.Height - 20F);
-            graphics.FillRectangle(barBrush, x, bounds.Bottom - barHeight, barWidth, barHeight);
+            var barBounds = new RectangleF(x, bounds.Bottom - barHeight, barWidth, barHeight);
+            graphics.FillRectangle(barBrush, barBounds);
+            hitRegions.Add((barBounds, $"{value.Label.Replace('\n', ' ')}\n{value.Value:0.#}"));
 
             var labelLines = value.Label.Split('\n');
             var labelY = bounds.Bottom + 2F;
@@ -1118,5 +1274,60 @@ public partial class FortniteReplayAnalyzer
             var valueSize = graphics.MeasureString(valueText, font);
             graphics.DrawString(valueText, font, textBrush, x + Math.Max(0F, (barWidth - valueSize.Width) / 2F), Math.Max(bounds.Top, bounds.Bottom - barHeight - valueSize.Height - 2F));
         }
+    }
+
+    private void PaintWeaponSharePieChart(Graphics graphics, Rectangle bounds, string title, List<(string Label, double Value)> values, List<(RectangleF Bounds, string Text)> hitRegions)
+    {
+        hitRegions.Clear();
+        graphics.Clear(Color.White);
+        using var titleFont = new Font("Segoe UI Semibold", 9F, FontStyle.Bold);
+        using var font = new Font("Segoe UI", 8.5F);
+        using var textBrush = new SolidBrush(Color.FromArgb(48, 56, 66));
+
+        graphics.DrawString(title, titleFont, textBrush, bounds.Left + 12, bounds.Top + 6);
+
+        if (values.Count == 0 || values.Sum(value => value.Value) <= 0)
+        {
+            graphics.DrawString("No weapon data available.", font, textBrush, bounds.Left + 12, bounds.Top + 30);
+            return;
+        }
+
+        var palette = new[]
+        {
+            Color.FromArgb(52, 123, 220),
+            Color.FromArgb(244, 124, 32),
+            Color.FromArgb(0, 150, 136),
+            Color.FromArgb(123, 31, 162),
+            Color.FromArgb(198, 40, 40),
+            Color.FromArgb(124, 179, 66)
+        };
+
+        var pieBounds = RectangleF.FromLTRB(bounds.Left + 12, bounds.Top + 28, bounds.Left + 220, bounds.Bottom - 12);
+        var total = values.Sum(value => value.Value);
+        var startAngle = -90F;
+        for (var i = 0; i < values.Count; i++)
+        {
+            var sweepAngle = (float)(values[i].Value / total * 360D);
+            using var brush = new SolidBrush(palette[i % palette.Length]);
+            graphics.FillPie(brush, pieBounds, startAngle, sweepAngle);
+            hitRegions.Add((pieBounds, $"{values[i].Label}\n{values[i].Value:0.#} ({values[i].Value / total:P1})"));
+
+            var legendX = pieBounds.Right + 16F;
+            var legendY = bounds.Top + 28F + (i * 22F);
+            graphics.FillRectangle(brush, legendX, legendY + 3F, 12F, 12F);
+            graphics.DrawString($"{values[i].Label}: {values[i].Value / total:P1}", font, textBrush, legendX + 18F, legendY);
+            startAngle += sweepAngle;
+        }
+    }
+
+    private void UpdateGraphToolTip(Control? control, List<(RectangleF Bounds, string Text)> hitRegions, Point location)
+    {
+        if (control is null)
+        {
+            return;
+        }
+
+        var hit = hitRegions.LastOrDefault(region => region.Bounds.Contains(location));
+        _graphToolTip.SetToolTip(control, string.IsNullOrWhiteSpace(hit.Text) ? string.Empty : hit.Text);
     }
 }

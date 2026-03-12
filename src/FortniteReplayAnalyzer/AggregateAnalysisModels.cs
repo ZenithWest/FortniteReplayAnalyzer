@@ -58,6 +58,27 @@ internal sealed class WeaponStatsAccumulator
     public float DamageToStructures { get; set; }
 }
 
+internal sealed class ReplayWeaponStatsSnapshot
+{
+    public required string WeaponType { get; init; }
+    public required string WeaponName { get; init; }
+    public int KillOrDownCount { get; init; }
+    public int EliminationCount { get; init; }
+    public int Hits { get; init; }
+    public int HitsToPlayers { get; init; }
+    public int HitsToBots { get; init; }
+    public int HitsToNpcs { get; init; }
+    public int HitsToStructures { get; init; }
+    public int CriticalHits { get; init; }
+    public int ShieldHits { get; init; }
+    public int FatalHits { get; init; }
+    public float TotalDamage { get; init; }
+    public float DamageToPlayers { get; init; }
+    public float DamageToBots { get; init; }
+    public float DamageToNpcs { get; init; }
+    public float DamageToStructures { get; init; }
+}
+
 internal sealed class DamageTimelinePoint
 {
     public double TimeValue { get; init; }
