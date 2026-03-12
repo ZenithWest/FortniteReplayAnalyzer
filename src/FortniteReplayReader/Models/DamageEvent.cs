@@ -21,6 +21,7 @@ public class DamageEvent
     public bool? IsShieldDestroyed { get; set; }
     public bool? IsShieldApplied { get; set; }
     public bool? IsBallistic { get; set; }
+    public bool UsesNonPlayerTarget { get; set; }
     public string? WeaponName { get; set; }
     public string? WeaponType { get; set; }
     public string? WeaponAssetName { get; set; }

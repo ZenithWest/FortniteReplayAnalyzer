@@ -802,7 +802,16 @@ public class FortniteReplayBuilder
             TryGetPlayerDataFromActor(actorId, out instigator);
         }
 
-        var targetActor = damageCues.HitActor ?? damageCues.NonPlayerHitActor;
+        var usesNonPlayerTarget = damageCues.NonPlayerHitActor.HasValue
+            && (damageCues.NonPlayerMagnitude.HasValue
+                || damageCues.NonPlayerLocation != null
+                || damageCues.NonPlayerNormal != null
+                || damageCues.NonPlayerbIsFatal.HasValue
+                || damageCues.NonPlayerbIsCritical.HasValue);
+
+        var targetActor = usesNonPlayerTarget
+            ? damageCues.NonPlayerHitActor
+            : damageCues.HitActor ?? damageCues.NonPlayerHitActor;
         PlayerData? target = null;
         if (targetActor.HasValue)
         {
@@ -829,6 +838,7 @@ public class FortniteReplayBuilder
             IsShieldDestroyed = damageCues.bIsShieldDestroyed,
             IsShieldApplied = damageCues.bIsShieldApplied,
             IsBallistic = damageCues.bIsBallistic,
+            UsesNonPlayerTarget = usesNonPlayerTarget,
             WeaponName = weapon?.WeaponName,
             WeaponType = weapon?.WeaponType,
             WeaponAssetName = weapon?.WeaponAssetName,

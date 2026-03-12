@@ -1141,8 +1141,8 @@ public partial class FortniteReplayAnalyzer : Form
         var attacker = FindPlayer(replay, evt.InstigatorId, evt.InstigatorName);
         var target = FindPlayer(replay, evt.TargetId, evt.TargetName);
         var timeValue = GetDamageTime(evt);
-        var attackerCategory = ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot);
-        var targetCategory = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
+        var attackerCategory = ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot, false);
+        var targetCategory = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot, evt.UsesNonPlayerTarget);
         var ownerTeamIndex = GetReplayOwner(replay)?.TeamIndex;
         var attackerIsTeammate = ownerTeamIndex.HasValue && attacker?.TeamIndex == ownerTeamIndex;
         var targetIsTeammate = ownerTeamIndex.HasValue && target?.TeamIndex == ownerTeamIndex;
@@ -1843,7 +1843,7 @@ public partial class FortniteReplayAnalyzer : Form
             }
         }
 
-        return "Unknown";
+        return GetUnknownWeaponFallback(evt) ?? "Unknown";
     }
 
     private string FormatCombatEventWeaponType(FortniteReplay replay, DamageEvent evt)
@@ -1858,6 +1858,34 @@ public partial class FortniteReplayAnalyzer : Form
             ?? InferWeaponLabelFromNearbyKillFeed(replay, evt);
 
         return string.IsNullOrWhiteSpace(inferred) ? label : inferred;
+    }
+
+    private static string? GetUnknownWeaponFallback(DamageEvent evt)
+    {
+        var eventTag = NormalizeWeaponDisplayLabel(evt.EventTag);
+        if (!string.IsNullOrWhiteSpace(eventTag))
+        {
+            return eventTag;
+        }
+
+        var assetName = NormalizeWeaponDisplayLabel(evt.WeaponAssetName);
+        if (!string.IsNullOrWhiteSpace(assetName))
+        {
+            return assetName;
+        }
+
+        var className = NormalizeWeaponDisplayLabel(evt.WeaponClassName);
+        if (!string.IsNullOrWhiteSpace(className))
+        {
+            return className;
+        }
+
+        if (!string.IsNullOrWhiteSpace(evt.EventTag))
+        {
+            return ShortGameplayTag(evt.EventTag);
+        }
+
+        return !string.IsNullOrWhiteSpace(evt.EventSource) ? evt.EventSource : null;
     }
 
     private static string? InferWeaponLabelFromNearbyDamageEvent(FortniteReplay replay, DamageEvent evt)
@@ -2676,15 +2704,15 @@ public partial class FortniteReplayAnalyzer : Form
             return false;
         }
 
-        var category = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
+        var category = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot, evt.UsesNonPlayerTarget);
         return IsDamageCategoryEnabled(category, _chkDamagePlayers, _chkDamageBots, _chkDamageStructures, _chkDamageNpcs);
     }
 
     private bool ShouldIncludePlayerDamageEvent(FortniteReplay replay, PlayerData player, DamageEvent evt)
     {
         var category = MatchesPlayer(player, evt.InstigatorId, evt.InstigatorName)
-            ? ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot)
-            : ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot);
+            ? ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot, evt.UsesNonPlayerTarget)
+            : ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot, false);
 
         return IsDamageCategoryEnabled(category, _chkPlayerDamagePlayers, _chkPlayerDamageBots, _chkPlayerDamageStructures, _chkPlayerDamageNpcs);
     }
@@ -2937,8 +2965,8 @@ public partial class FortniteReplayAnalyzer : Form
             }
 
             var category = targetPerspective
-                ? ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot)
-                : ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot);
+                ? ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot, evt.UsesNonPlayerTarget)
+                : ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot, false);
 
             switch (category)
             {
@@ -2960,8 +2988,15 @@ public partial class FortniteReplayAnalyzer : Form
         return totals;
     }
 
-    private DamageParticipantCategory ClassifyDamageParticipant(FortniteReplay replay, int? numericId, string? lookupKey, bool isBot)
+    private DamageParticipantCategory ClassifyDamageParticipant(FortniteReplay replay, int? numericId, string? lookupKey, bool isBot, bool preferNonPlayerTarget = false)
     {
+        if (preferNonPlayerTarget)
+        {
+            return numericId.HasValue && numericId.Value < 1000
+                ? DamageParticipantCategory.Npc
+                : DamageParticipantCategory.Structure;
+        }
+
         var player = FindPlayer(replay, numericId, lookupKey);
         if (player is not null)
         {
