@@ -560,6 +560,8 @@ public partial class FortniteReplayAnalyzer
             .Select(accumulator =>
             {
                 var matchesUsed = Math.Max(1, accumulator.MatchKeys.Count);
+                var includedHits = accumulator.HitsToPlayers + (includeBotDamage ? accumulator.HitsToBots : 0);
+                var includedDamage = accumulator.DamageToPlayers + (includeBotDamage ? accumulator.DamageToBots : 0F);
                 return new WeaponStatsRow
                 {
                     WeaponType = accumulator.WeaponType,
@@ -567,7 +569,7 @@ public partial class FortniteReplayAnalyzer
                     MatchesUsed = matchesUsed,
                     KillOrDownCount = accumulator.KillOrDownCount,
                     EliminationCount = accumulator.EliminationCount,
-                    Hits = accumulator.Hits,
+                    Hits = includedHits,
                     HitsToPlayers = accumulator.HitsToPlayers,
                     HitsToBots = accumulator.HitsToBots,
                     HitsToNpcs = accumulator.HitsToNpcs,
@@ -575,16 +577,16 @@ public partial class FortniteReplayAnalyzer
                     CriticalHits = accumulator.CriticalHits,
                     ShieldHits = accumulator.ShieldHits,
                     FatalHits = accumulator.FatalHits,
-                    TotalDamage = accumulator.TotalDamage,
+                    TotalDamage = includedDamage,
                     DamageToPlayers = accumulator.DamageToPlayers,
                     DamageToBots = accumulator.DamageToBots,
                     DamageToNpcs = accumulator.DamageToNpcs,
                     DamageToStructures = accumulator.DamageToStructures,
-                    AvgDamage = accumulator.Hits == 0 ? 0F : accumulator.TotalDamage / accumulator.Hits,
-                    AvgDamagePerMatch = accumulator.TotalDamage / matchesUsed,
-                    AvgHitsPerMatch = (float)accumulator.Hits / matchesUsed,
+                    AvgDamage = includedHits == 0 ? 0F : includedDamage / includedHits,
+                    AvgDamagePerMatch = includedDamage / matchesUsed,
+                    AvgHitsPerMatch = (float)includedHits / matchesUsed,
                     AvgKillOrDownsPerMatch = (float)accumulator.KillOrDownCount / matchesUsed,
-                    CriticalRate = accumulator.Hits == 0 ? 0F : (float)accumulator.CriticalHits / accumulator.Hits * 100F
+                    CriticalRate = includedHits == 0 ? 0F : (float)accumulator.CriticalHits / includedHits * 100F
                 };
             })
             .OrderByDescending(row => row.TotalDamage)
@@ -605,7 +607,9 @@ public partial class FortniteReplayAnalyzer
 
         foreach (var evt in replay.DamageEvents.Where(evt => IsDamageByPlayer(owner, evt)))
         {
-            var category = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
+            var category = IsLikelyStructureDamageEvent(evt)
+                ? DamageParticipantCategory.Structure
+                : ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
             var weaponType = GetWeaponStatsTypeLabel(replay, evt);
             var weaponName = GetWeaponStatsNameLabel(replay, evt);
             if (string.IsNullOrWhiteSpace(weaponType) || string.Equals(weaponType, "Unknown", StringComparison.OrdinalIgnoreCase))
@@ -615,8 +619,7 @@ public partial class FortniteReplayAnalyzer
 
             var accumulator = GetOrCreateWeaponAccumulator(accumulators, weaponType, weaponName);
             accumulator.MatchKeys.Add(matchKey);
-            accumulator.Hits++;
-            accumulator.TotalDamage += evt.Magnitude ?? 0F;
+            var magnitude = evt.Magnitude ?? 0F;
 
             if (evt.IsCritical == true)
             {
@@ -636,20 +639,24 @@ public partial class FortniteReplayAnalyzer
             switch (category)
             {
                 case DamageParticipantCategory.Player:
+                    accumulator.Hits++;
+                    accumulator.TotalDamage += magnitude;
                     accumulator.HitsToPlayers++;
-                    accumulator.DamageToPlayers += evt.Magnitude ?? 0F;
+                    accumulator.DamageToPlayers += magnitude;
                     break;
                 case DamageParticipantCategory.Bot:
+                    accumulator.Hits++;
+                    accumulator.TotalDamage += magnitude;
                     accumulator.HitsToBots++;
-                    accumulator.DamageToBots += evt.Magnitude ?? 0F;
+                    accumulator.DamageToBots += magnitude;
                     break;
                 case DamageParticipantCategory.Npc:
                     accumulator.HitsToNpcs++;
-                    accumulator.DamageToNpcs += evt.Magnitude ?? 0F;
+                    accumulator.DamageToNpcs += magnitude;
                     break;
                 case DamageParticipantCategory.Structure:
                     accumulator.HitsToStructures++;
-                    accumulator.DamageToStructures += evt.Magnitude ?? 0F;
+                    accumulator.DamageToStructures += magnitude;
                     break;
             }
         }
@@ -715,13 +722,13 @@ public partial class FortniteReplayAnalyzer
             accumulator.ShieldHits += snapshot.ShieldHits;
             accumulator.FatalHits += snapshot.FatalHits;
 
-            accumulator.Hits += snapshot.HitsToPlayers + snapshot.HitsToNpcs + snapshot.HitsToStructures + (includeBotDamage ? snapshot.HitsToBots : 0);
+            accumulator.Hits += snapshot.HitsToPlayers + (includeBotDamage ? snapshot.HitsToBots : 0);
             accumulator.HitsToPlayers += snapshot.HitsToPlayers;
             accumulator.HitsToNpcs += snapshot.HitsToNpcs;
             accumulator.HitsToStructures += snapshot.HitsToStructures;
             accumulator.HitsToBots += includeBotDamage ? snapshot.HitsToBots : 0;
 
-            accumulator.TotalDamage += snapshot.DamageToPlayers + snapshot.DamageToNpcs + snapshot.DamageToStructures + (includeBotDamage ? snapshot.DamageToBots : 0F);
+            accumulator.TotalDamage += snapshot.DamageToPlayers + (includeBotDamage ? snapshot.DamageToBots : 0F);
             accumulator.DamageToPlayers += snapshot.DamageToPlayers;
             accumulator.DamageToNpcs += snapshot.DamageToNpcs;
             accumulator.DamageToStructures += snapshot.DamageToStructures;
