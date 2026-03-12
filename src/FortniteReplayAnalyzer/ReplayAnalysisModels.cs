@@ -4,6 +4,14 @@ using Unreal.Core.Models.Enums;
 
 namespace FortniteReplayAnalyzer;
 
+internal enum DamageParticipantCategory
+{
+    Player,
+    Bot,
+    Npc,
+    Structure
+}
+
 internal sealed class ReplayBrowserRow
 {
     public string FilePath { get; set; } = string.Empty;
@@ -19,6 +27,7 @@ internal sealed class ReplayBrowserRow
     public int PlayerCount { get; set; }
     public string PlayerCountText { get; set; } = "-";
     public FortniteReplay? Replay { get; set; }
+    public ReplayViewCache? ViewCache { get; set; }
     public List<ReplayWeaponStatsSnapshot> WeaponStatsSnapshots { get; set; } = [];
     public string Status { get; set; } = "Not loaded";
     public bool IsLoading { get; set; }
@@ -72,6 +81,11 @@ internal sealed class KillFeedRow
     public required string TargetName { get; init; }
     public int? TargetId { get; init; }
     public string? TargetLookupKey { get; init; }
+    public bool ActorIsBot { get; init; }
+    public bool TargetIsBot { get; init; }
+    public bool ActorIsTeammate { get; init; }
+    public bool TargetIsTeammate { get; init; }
+    public bool InvolvesOwnerTeam { get; init; }
     public required string ReasonText { get; init; }
     public required string DistanceText { get; init; }
 }
@@ -88,6 +102,9 @@ internal sealed class CombatEventRow
     public required string TargetName { get; init; }
     public int? TargetId { get; init; }
     public string? TargetLookupKey { get; init; }
+    public DamageParticipantCategory AttackerCategory { get; init; }
+    public DamageParticipantCategory TargetCategory { get; init; }
+    public bool InvolvesOwnerTeam { get; init; }
     public required string EventText { get; init; }
     public required string DamageText { get; init; }
     public required string WeaponTypeText { get; init; }
@@ -120,5 +137,24 @@ internal sealed class PlayerVictimRow
     public required string ReasonText { get; init; }
     public required string TimeText { get; init; }
     public required string DistanceText { get; init; }
+}
+
+internal sealed class PlayerViewCache
+{
+    public required PlayerData Player { get; init; }
+    public required string CacheKey { get; init; }
+    public required List<DetailRow> OverviewRows { get; init; }
+    public required List<KillFeedRow> KillLogRows { get; init; }
+    public required List<PlayerVictimRow> VictimRows { get; init; }
+    public required List<CombatEventRow> DamageRows { get; init; }
+}
+
+internal sealed class ReplayViewCache
+{
+    public required List<DetailRow> ReplayDetails { get; init; }
+    public required List<KillFeedRow> KillFeedRows { get; init; }
+    public required List<CombatEventRow> CombatEventRows { get; init; }
+    public required List<PlayerSummaryRow> PlayerRows { get; init; }
+    public required Dictionary<string, PlayerViewCache> PlayerCaches { get; init; }
 }
 

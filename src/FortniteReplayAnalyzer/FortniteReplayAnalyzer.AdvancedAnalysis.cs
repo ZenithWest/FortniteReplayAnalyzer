@@ -960,8 +960,8 @@ public partial class FortniteReplayAnalyzer
         yield return new DetailRow("Critical Hit Rate", combatDamageEvents.Count == 0 ? "-" : $"{critCount / (double)combatDamageEvents.Count * 100:0.0}%");
         yield return new DetailRow("Avg Damage Events Logged", $"{combatDamageEvents.Count / (double)Math.Max(1, owners.Count):0.0}");
         yield return new DetailRow("Avg Hit Damage", combatDamageEvents.Count == 0 ? "-" : $"{combatDamageEvents.Average(x => x.Event.Magnitude ?? 0F):0.0}");
-        yield return new DetailRow("Avg Damage To Bots", $"{botDamageTotal / Math.Max(1, owners.Count):0.0}");
-        yield return new DetailRow("Avg Damage To Players", $"{playerDamageTotal / Math.Max(1, owners.Count):0.0}");
+        yield return new DetailRow("Avg Logged Damage To Bots", $"{botDamageTotal / Math.Max(1, owners.Count):0.0}");
+        yield return new DetailRow("Avg Logged Damage To Players", $"{playerDamageTotal / Math.Max(1, owners.Count):0.0}");
         yield return new DetailRow("Avg Revives", $"{owners.Sum(x => x.Replay.Stats?.Revives ?? 0) / (double)Math.Max(1, owners.Count):0.0}");
         yield return new DetailRow("Avg Assists", $"{owners.Sum(x => x.Replay.Stats?.Assists ?? 0) / (double)Math.Max(1, owners.Count):0.0}");
         yield return new DetailRow("Avg Materials Gathered", $"{owners.Sum(x => x.Replay.Stats?.MaterialsGathered ?? 0) / (double)Math.Max(1, owners.Count):0.0}");
@@ -1058,7 +1058,7 @@ public partial class FortniteReplayAnalyzer
 
             var kills = replay.KillFeed
                 .Where(entry => MatchesResolvedKillFeedActor(replay, owner, entry) && !entry.IsRevived && !entry.IsDowned)
-                .Count(entry => (_chkOverallKillsIncludeBots?.Checked ?? true) || !(FindPlayer(replay, entry.PlayerId, entry.PlayerName)?.IsBot ?? entry.PlayerIsBot));
+                .Count(entry => includeBotKills || !(FindPlayer(replay, entry.PlayerId, entry.PlayerName)?.IsBot ?? entry.PlayerIsBot));
 
             yield return new MatchTrendRow
             {
@@ -1225,7 +1225,7 @@ public partial class FortniteReplayAnalyzer
         using var titleFont = new Font("Segoe UI Semibold", 9F, FontStyle.Bold);
         using var barBrush = new SolidBrush(barColor);
 
-        var chart = Rectangle.FromLTRB(bounds.Left + 52, bounds.Top + 24, bounds.Right - 18, bounds.Bottom - 56);
+        var chart = Rectangle.FromLTRB(bounds.Left + 56, bounds.Top + 24, bounds.Right - 18, bounds.Bottom - 76);
         graphics.DrawString(title, titleFont, textBrush, bounds.Left + 12, bounds.Top + 4);
         PaintVerticalBarChart(graphics, chart, values, barBrush, axisPen, gridPen, textBrush, font, hitRegions);
     }
@@ -1261,12 +1261,12 @@ public partial class FortniteReplayAnalyzer
             hitRegions.Add((barBounds, $"{value.Label.Replace('\n', ' ')}\n{value.Value:0.#}"));
 
             var labelLines = value.Label.Split('\n');
-            var labelY = bounds.Bottom + 2F;
+            var labelY = bounds.Bottom + 4F;
             foreach (var line in labelLines)
             {
                 var labelSize = graphics.MeasureString(line, font);
                 graphics.DrawString(line, font, textBrush, x + Math.Max(0F, (barWidth - labelSize.Width) / 2F), labelY);
-                labelY += labelSize.Height - 1F;
+                labelY += labelSize.Height - 2F;
             }
 
             var valueText = value.Value.ToString("0.#", CultureInfo.CurrentCulture);

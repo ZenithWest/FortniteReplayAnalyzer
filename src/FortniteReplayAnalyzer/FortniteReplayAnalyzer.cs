@@ -858,10 +858,11 @@ public partial class FortniteReplayAnalyzer : Form
         }
 
         EnsureReplayTab(row);
+        EnsureReplayViewCache(row);
         lblReplayStatus.Text = $"{row.FileName} loaded";
         lblPlayerPanelTitle.Text = "Player Stats";
 
-        dgvGameStats.DataSource = BuildReplayDetails(row).ToList();
+        dgvGameStats.DataSource = row.ViewCache?.ReplayDetails ?? BuildReplayDetails(row).ToList();
         BuildKillFeed(row.Replay);
         BuildCombatEvents(row.Replay);
         BuildPlayerList(row.Replay);
@@ -871,10 +872,119 @@ public partial class FortniteReplayAnalyzer : Form
         UpdateDamageTimelineChart();
     }
 
+    private void EnsureReplayViewCache(ReplayBrowserRow row)
+    {
+        if (row.Replay is null || row.ViewCache is not null)
+        {
+            return;
+        }
+
+        row.ViewCache = BuildReplayViewCache(row, row.Replay);
+    }
+
     private static PlayerData? ResolveDefaultPlayer(FortniteReplay replay)
     {
         return GetReplayOwner(replay)
             ?? replay.PlayerData?.OrderBy(p => p.Placement ?? int.MaxValue).ThenBy(p => p.Id ?? int.MaxValue).FirstOrDefault();
+    }
+
+    private ReplayViewCache BuildReplayViewCache(ReplayBrowserRow row, FortniteReplay replay)
+    {
+        var replayDetails = BuildReplayDetails(row).ToList();
+        var killFeedRows = replay.KillFeed
+            .Select(entry => CreateKillFeedRow(replay, entry))
+            .OrderBy(entry => entry.TimeValue)
+            .ToList();
+        var combatRows = replay.DamageEvents
+            .Select(evt => CreateCombatEventRow(replay, evt))
+            .OrderBy(evt => evt.TimeValue)
+            .ToList();
+        var playerRows = replay.PlayerData.Select(player => new PlayerSummaryRow
+        {
+            Player = player,
+            ProfileIcon = GetPlayerSkinIcon(player),
+            DisplayName = ResolvePlayerName(player, player.Id, player.PlayerId),
+            Team = player.TeamIndex,
+            TeamText = FormatNullable(player.TeamIndex),
+            Placement = player.Placement,
+            PlacementText = FormatNullable(player.Placement),
+            Kills = player.Kills,
+            KillsText = FormatNullable(player.Kills),
+            Platform = string.IsNullOrWhiteSpace(player.Platform) ? "-" : player.Platform,
+            IsBot = player.IsBot
+        }).ToList();
+
+        var playerCaches = replay.PlayerData
+            .ToDictionary(
+                GetPlayerCacheKey,
+                player => BuildPlayerViewCache(replay, player),
+                StringComparer.OrdinalIgnoreCase);
+
+        return new ReplayViewCache
+        {
+            ReplayDetails = replayDetails,
+            KillFeedRows = killFeedRows,
+            CombatEventRows = combatRows,
+            PlayerRows = playerRows,
+            PlayerCaches = playerCaches
+        };
+    }
+
+    private PlayerViewCache BuildPlayerViewCache(FortniteReplay replay, PlayerData player)
+    {
+        var overviewRows = BuildPlayerOverview(replay, player).ToList();
+        var killLogRows = replay.KillFeed
+            .Where(entry => MatchesPlayer(player, entry.PlayerId, entry.PlayerName) || MatchesResolvedKillFeedActor(replay, player, entry))
+            .Select(entry => CreateKillFeedRow(replay, entry))
+            .OrderBy(entry => entry.TimeValue)
+            .ToList();
+        var victimRows = replay.KillFeed
+            .Where(entry => MatchesResolvedKillFeedActor(replay, player, entry))
+            .OrderBy(GetKillFeedTime)
+            .Select(entry =>
+            {
+                var victim = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
+                return new PlayerVictimRow
+                {
+                    PlayerIcon = GetPlayerSkinIcon(victim),
+                    PlayerName = ResolvePlayerName(victim, entry.PlayerId, entry.PlayerName),
+                    PlayerId = entry.PlayerId,
+                    PlayerLookupKey = victim?.PlayerId ?? entry.PlayerName,
+                    IsBot = victim?.IsBot ?? false,
+                    EventText = GetKillFeedEventText(entry),
+                    ReasonText = FormatKillFeedReason(replay, entry),
+                    TimeText = FormatMatchClock(GetKillFeedTime(entry)),
+                    DistanceText = FormatDistance(entry.Distance)
+                };
+            })
+            .ToList();
+        var damageRows = replay.DamageEvents
+            .Where(evt => MatchesPlayer(player, evt.InstigatorId, evt.InstigatorName) || MatchesPlayer(player, evt.TargetId, evt.TargetName))
+            .Select(evt => CreateCombatEventRow(replay, evt))
+            .OrderBy(evt => evt.TimeValue)
+            .ToList();
+
+        return new PlayerViewCache
+        {
+            Player = player,
+            CacheKey = GetPlayerCacheKey(player),
+            OverviewRows = overviewRows,
+            KillLogRows = killLogRows,
+            VictimRows = victimRows,
+            DamageRows = damageRows
+        };
+    }
+
+    private static string GetPlayerCacheKey(PlayerData player)
+    {
+        if (!string.IsNullOrWhiteSpace(player.PlayerId))
+        {
+            return player.PlayerId;
+        }
+
+        return player.Id?.ToString(CultureInfo.InvariantCulture)
+            ?? player.PlayerName
+            ?? string.Empty;
     }
 
     private IEnumerable<DetailRow> BuildReplayDetails(ReplayBrowserRow row)
@@ -2984,14 +3094,6 @@ public partial class FortniteReplayAnalyzer : Form
         public float Bots { get; set; }
         public float Npcs { get; set; }
         public float Structures { get; set; }
-    }
-
-    private enum DamageParticipantCategory
-    {
-        Player,
-        Bot,
-        Npc,
-        Structure
     }
 
     private sealed record ReplayLoadResult(FortniteReplay? Replay, Exception? Exception);
