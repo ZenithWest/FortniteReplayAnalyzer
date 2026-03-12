@@ -191,6 +191,7 @@ public partial class FortniteReplayAnalyzer : Form
         _chkDamageBots = CreateFilterCheckBox("Bots", (_, _) => RefreshDamageEventViews(), true);
         _chkDamageStructures = CreateFilterCheckBox("Structure", (_, _) => RefreshDamageEventViews(), true);
         _chkDamageNpcs = CreateFilterCheckBox("NPC", (_, _) => RefreshDamageEventViews(), true);
+        _chkDamageNpcs.Visible = false;
 
         damageFilterPanel.Controls.Add(_chkTeamDamageOnly);
         damageFilterPanel.Controls.Add(_chkDamagePlayers);
@@ -230,6 +231,7 @@ public partial class FortniteReplayAnalyzer : Form
         _chkPlayerDamageBots = CreateFilterCheckBox("Bots", (_, _) => RefreshDamageEventViews(), true);
         _chkPlayerDamageStructures = CreateFilterCheckBox("Structure", (_, _) => RefreshDamageEventViews(), true);
         _chkPlayerDamageNpcs = CreateFilterCheckBox("NPC", (_, _) => RefreshDamageEventViews(), true);
+        _chkPlayerDamageNpcs.Visible = false;
         playerDamageFilterPanel.Controls.Add(_chkPlayerDamagePlayers);
         playerDamageFilterPanel.Controls.Add(_chkPlayerDamageBots);
         playerDamageFilterPanel.Controls.Add(_chkPlayerDamageStructures);
@@ -1349,12 +1351,10 @@ public partial class FortniteReplayAnalyzer : Form
         yield return new DetailRow("Total Damage", FormatDamageTotal(damageDealt.Players + damageDealt.Bots + damageDealt.Npcs + damageDealt.Structures));
         yield return new DetailRow("Damage To Players", FormatDamageTotal(damageDealt.Players));
         yield return new DetailRow("Damage To Bots", FormatDamageTotal(damageDealt.Bots));
-        yield return new DetailRow("Damage To NPCs", FormatDamageTotal(damageDealt.Npcs));
-        yield return new DetailRow("Damage To Structures", FormatDamageTotal(damageDealt.Structures));
+        yield return new DetailRow("Damage To Structures", FormatDamageTotal(damageDealt.Structures + damageDealt.Npcs));
         yield return new DetailRow("Damage Taken From Players", FormatDamageTotal(damageTaken.Players));
         yield return new DetailRow("Damage Taken From Bots", FormatDamageTotal(damageTaken.Bots));
-        yield return new DetailRow("Damage Taken From NPCs", FormatDamageTotal(damageTaken.Npcs));
-        yield return new DetailRow("Damage Taken From World", FormatDamageTotal(damageTaken.Structures));
+        yield return new DetailRow("Damage Taken From Structures", FormatDamageTotal(damageTaken.Structures + damageTaken.Npcs));
     }
 
     private IEnumerable<KillFeedRow> BuildPlayerCombatLog(FortniteReplay replay, PlayerData player)
@@ -1798,6 +1798,11 @@ public partial class FortniteReplayAnalyzer : Form
             return ResolvePlayerName(player, numericId, fallback);
         }
 
+        if (!string.IsNullOrWhiteSpace(fallback))
+        {
+            return ShortenIdentifier(fallback);
+        }
+
         if (isBot && numericId.HasValue)
         {
             return $"Bot {numericId.Value:000}";
@@ -1805,10 +1810,10 @@ public partial class FortniteReplayAnalyzer : Form
 
         if (numericId.HasValue)
         {
-            return numericId.Value < 1000 ? $"NPC {numericId.Value:000}" : $"Structure {numericId.Value}";
+            return $"Structure {numericId.Value}";
         }
 
-        return ShortenIdentifier(fallback);
+        return "Structure";
     }
 
     private static string FormatWeaponType(DamageEvent evt)
@@ -1885,7 +1890,7 @@ public partial class FortniteReplayAnalyzer : Form
             return ShortGameplayTag(evt.EventTag);
         }
 
-        return !string.IsNullOrWhiteSpace(evt.EventSource) ? evt.EventSource : null;
+        return null;
     }
 
     private static string? InferWeaponLabelFromNearbyDamageEvent(FortniteReplay replay, DamageEvent evt)
@@ -2792,7 +2797,7 @@ public partial class FortniteReplayAnalyzer : Form
         {
             DamageParticipantCategory.Player => players?.Checked ?? true,
             DamageParticipantCategory.Bot => bots?.Checked ?? true,
-            DamageParticipantCategory.Npc => npcs?.Checked ?? true,
+            DamageParticipantCategory.Npc => (structures?.Checked ?? true) || (npcs?.Checked ?? true),
             _ => structures?.Checked ?? true
         };
     }
@@ -2977,8 +2982,6 @@ public partial class FortniteReplayAnalyzer : Form
                     totals.Bots += amount;
                     break;
                 case DamageParticipantCategory.Npc:
-                    totals.Npcs += amount;
-                    break;
                 default:
                     totals.Structures += amount;
                     break;
@@ -2992,9 +2995,7 @@ public partial class FortniteReplayAnalyzer : Form
     {
         if (preferNonPlayerTarget)
         {
-            return numericId.HasValue && numericId.Value < 1000
-                ? DamageParticipantCategory.Npc
-                : DamageParticipantCategory.Structure;
+            return DamageParticipantCategory.Structure;
         }
 
         var player = FindPlayer(replay, numericId, lookupKey);
@@ -3008,9 +3009,9 @@ public partial class FortniteReplayAnalyzer : Form
             return DamageParticipantCategory.Bot;
         }
 
-        if (numericId.HasValue && numericId.Value < 1000)
+        if (!string.IsNullOrWhiteSpace(lookupKey))
         {
-            return DamageParticipantCategory.Npc;
+            return DamageParticipantCategory.Player;
         }
 
         return DamageParticipantCategory.Structure;
