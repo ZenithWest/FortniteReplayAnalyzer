@@ -1,3 +1,9 @@
+using FortniteReplayReader;
+using FortniteReplayReader.Models;
+using Microsoft.VisualBasic.ApplicationServices;
+using System.Runtime.Intrinsics.Arm;
+using Unreal.Core.Models.Enums;
+
 namespace FortniteReplayAnalyzer;
 
 internal static class Program
@@ -5,6 +11,16 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        var enable_debug_load_replay = false;
+
+        if (enable_debug_load_replay)
+        {
+            var filename = "C:\\Users\\Zenit\\AppData\\Local\\FortniteGame\\Saved\\Demos\\UnsavedReplay-2026.03.11-21.53.21.replay";
+            var reader = new ReplayReader(null, ParseMode.Full);
+            var blah = reader.TryReadReplay(filename, out var replay, out var exception);
+            enable_debug_load_replay = false;
+        }
+
         var settings = AnalyzerSettingsStore.Load();
         DebugOutputWriter.SetEnabled(settings.DebugOutputEnabled);
 
