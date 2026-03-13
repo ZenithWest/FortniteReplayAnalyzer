@@ -946,7 +946,7 @@ public partial class FortniteReplayAnalyzer : Form
                 ActorLookupKey = actor.Player?.PlayerId ?? actor.LookupKey,
                 TargetId = target?.Id ?? entry.PlayerId,
                 TargetLookupKey = target?.PlayerId ?? entry.PlayerName,
-                TimeValue = GetKillFeedTime(entry),
+            TimeValue = GetKillFeedTime(replay, entry),
                 WeaponLabel = reason
             });
         }
@@ -1027,7 +1027,7 @@ public partial class FortniteReplayAnalyzer : Form
                     IsBot = victim?.IsBot ?? false,
                     EventText = GetKillFeedEventText(entry),
                     ReasonText = FormatKillFeedReason(replay, entry),
-                    TimeText = FormatMatchClock(GetKillFeedTime(entry)),
+                    TimeText = FormatMatchClock(GetKillFeedTime(replay, entry)),
                     DistanceText = FormatDistance(entry.Distance)
                 };
             })
@@ -1107,7 +1107,7 @@ public partial class FortniteReplayAnalyzer : Form
     {
         var actorReference = ResolveKillFeedActorReference(replay, entry);
         var targetPlayer = FindPlayer(replay, entry.PlayerId, entry.PlayerName);
-        var timeValue = GetKillFeedTime(entry);
+        var timeValue = GetKillFeedTime(replay, entry);
         var ownerTeamIndex = GetReplayOwner(replay)?.TeamIndex;
         var actorIsTeammate = ownerTeamIndex.HasValue && actorReference.Player?.TeamIndex == ownerTeamIndex;
         var targetIsTeammate = ownerTeamIndex.HasValue && targetPlayer?.TeamIndex == ownerTeamIndex;
@@ -1142,7 +1142,7 @@ public partial class FortniteReplayAnalyzer : Form
     {
         var attacker = FindPlayer(replay, evt.InstigatorId, evt.InstigatorName);
         var target = FindPlayer(replay, evt.TargetId, evt.TargetName);
-        var timeValue = GetDamageTime(evt);
+        var timeValue = GetDamageTime(replay, evt);
         var attackerCategory = GetDamageEventInstigatorCategory(replay, evt);
         var targetCategory = GetDamageEventTargetCategory(replay, evt);
         var ownerTeamIndex = GetReplayOwner(replay)?.TeamIndex;
@@ -1346,11 +1346,11 @@ public partial class FortniteReplayAnalyzer : Form
         yield return new DetailRow("Pickaxe", player.Cosmetics.Pickaxe ?? "-");
         yield return new DetailRow("Glider", player.Cosmetics.Glider ?? "-");
         yield return new DetailRow("Death Cause", FormatNullable(player.DeathCause));
-        yield return new DetailRow("Death Time", deathEvent is null ? "-" : FormatMatchClock(GetKillFeedTime(deathEvent)));
+        yield return new DetailRow("Death Time", deathEvent is null ? "-" : FormatMatchClock(GetKillFeedTime(replay, deathEvent)));
         yield return new DetailRow("Eliminated By", !eliminatedBy.HasValue ? "-" : ResolvePlayerName(eliminatedBy.Value.Player, eliminatedBy.Value.NumericId, eliminatedBy.Value.LookupKey));
         yield return new DetailRow("Damage Events Given", hitsGiven.ToString(CultureInfo.CurrentCulture));
         yield return new DetailRow("Damage Events Taken", hitsTaken.ToString(CultureInfo.CurrentCulture));
-        yield return new DetailRow("Total Damage", FormatDamageTotal(damageDealt.Players + damageDealt.Bots + damageDealt.Npcs + damageDealt.Structures));
+        yield return new DetailRow("Total Damage", FormatDamageTotal(damageDealt.Players + damageDealt.Bots));
         yield return new DetailRow("Damage To Players", FormatDamageTotal(damageDealt.Players));
         yield return new DetailRow("Damage To Bots", FormatDamageTotal(damageDealt.Bots));
         yield return new DetailRow("Damage To Structures", FormatDamageTotal(damageDealt.Structures + damageDealt.Npcs));
@@ -1399,7 +1399,7 @@ public partial class FortniteReplayAnalyzer : Form
                     IsBot = victim?.IsBot ?? false,
                     EventText = GetKillFeedEventText(entry),
                     ReasonText = FormatKillFeedReason(replay, entry),
-                    TimeText = FormatMatchClock(GetKillFeedTime(entry)),
+                    TimeText = FormatMatchClock(GetKillFeedTime(replay, entry)),
                     DistanceText = FormatDistance(entry.Distance)
                 };
             });
@@ -1761,7 +1761,7 @@ public partial class FortniteReplayAnalyzer : Form
             return empty;
         }
 
-        var currentTime = GetKillFeedTime(entry);
+        var currentTime = GetKillFeedTime(replay, entry);
         foreach (var priorEntry in lookupCache.KillFeedByDescendingTime)
         {
             if (ReferenceEquals(priorEntry, entry)
@@ -1895,13 +1895,13 @@ public partial class FortniteReplayAnalyzer : Form
         return null;
     }
 
-    private static string? InferWeaponLabelFromNearbyDamageEvent(FortniteReplay replay, DamageEvent evt)
+    private string? InferWeaponLabelFromNearbyDamageEvent(FortniteReplay replay, DamageEvent evt)
     {
-        var eventTime = GetDamageTime(evt);
+        var eventTime = GetDamageTime(replay, evt);
         return replay.DamageEvents
             .Where(candidate => !ReferenceEquals(candidate, evt))
             .Where(candidate => candidate.InstigatorId == evt.InstigatorId && candidate.TargetId == evt.TargetId)
-            .Where(candidate => Math.Abs(GetDamageTime(candidate) - eventTime) <= 2.5D)
+            .Where(candidate => Math.Abs(GetDamageTime(replay, candidate) - eventTime) <= 2.5D)
             .Select(candidate => GetMostSpecificWeaponLabel(candidate) ?? FormatWeaponType(candidate))
             .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate) && !string.Equals(candidate, "Unknown", StringComparison.OrdinalIgnoreCase));
     }
@@ -3145,7 +3145,7 @@ public partial class FortniteReplayAnalyzer : Form
         }
 
         var desiredKnocked = entry.IsDowned;
-        var entryTime = GetKillFeedTime(entry);
+        var entryTime = GetKillFeedTime(replay, entry);
         var matchingElimination = replay.Eliminations
             .Where(elim => string.Equals(elim.Eliminated, targetId, StringComparison.OrdinalIgnoreCase))
             .Where(elim => string.IsNullOrWhiteSpace(actorId) || string.Equals(elim.Eliminator, actorId, StringComparison.OrdinalIgnoreCase))
@@ -3303,7 +3303,28 @@ public partial class FortniteReplayAnalyzer : Form
 
     private static double GetKillFeedTime(KillFeedEntry entry) => entry.ReplicatedWorldTimeSecondsDouble ?? entry.ReplicatedWorldTimeSeconds ?? 0;
 
+    private double GetKillFeedTime(FortniteReplay replay, KillFeedEntry entry)
+    {
+        return NormalizeReplayEventTime(replay, GetKillFeedTime(entry));
+    }
+
     private static double GetDamageTime(DamageEvent evt) => evt.ReplicatedWorldTimeSecondsDouble ?? evt.ReplicatedWorldTimeSeconds ?? 0;
+
+    private double GetDamageTime(FortniteReplay replay, DamageEvent evt)
+    {
+        return NormalizeReplayEventTime(replay, GetDamageTime(evt));
+    }
+
+    private double NormalizeReplayEventTime(FortniteReplay replay, double rawTime)
+    {
+        if (rawTime <= 0)
+        {
+            return 0;
+        }
+
+        var offset = GetReplayLookupCache(replay).EventTimeOffset;
+        return Math.Max(0, rawTime - offset);
+    }
 
     private static string FormatNullable(object? value)
     {
@@ -3366,6 +3387,7 @@ public partial class FortniteReplayAnalyzer : Form
         public Dictionary<KillFeedEntry, (PlayerData? Player, int? NumericId, string? LookupKey)> ResolvedActorCache { get; } = new();
         public List<KillFeedEntry> KillFeedByDescendingTime { get; } = [];
         public List<KillFeedWeaponCue> KillFeedWeaponCues { get; } = [];
+        public double EventTimeOffset { get; private set; }
 
         public static ReplayLookupCache Create(FortniteReplay replay)
         {
@@ -3388,7 +3410,26 @@ public partial class FortniteReplayAnalyzer : Form
             }
 
             cache.KillFeedByDescendingTime.AddRange(replay.KillFeed.OrderByDescending(GetKillFeedTime));
+            cache.EventTimeOffset = GetInitialEventTime(replay);
             return cache;
+        }
+
+        private static double GetInitialEventTime(FortniteReplay replay)
+        {
+            var minKillFeed = replay.KillFeed
+                .Select(GetKillFeedTime)
+                .Where(time => time > 0)
+                .DefaultIfEmpty(double.MaxValue)
+                .Min();
+
+            var minDamage = replay.DamageEvents
+                .Select(GetDamageTime)
+                .Where(time => time > 0)
+                .DefaultIfEmpty(double.MaxValue)
+                .Min();
+
+            var minTime = Math.Min(minKillFeed, minDamage);
+            return minTime == double.MaxValue ? 0 : minTime;
         }
     }
 

@@ -853,7 +853,7 @@ public partial class FortniteReplayAnalyzer
     private string? InferWeaponLabelFromNearbyKillFeed(FortniteReplay replay, DamageEvent evt)
     {
         var weaponCues = GetKillFeedWeaponCues(replay);
-        var eventTime = GetDamageTime(evt);
+        var eventTime = GetDamageTime(replay, evt);
         var instigatorKey = evt.InstigatorName;
         var targetKey = evt.TargetName;
         string? bestReason = null;
@@ -1029,7 +1029,7 @@ public partial class FortniteReplayAnalyzer
             var events = replay.DamageEvents
                 .Where(evt => IsDamageByPlayer(player, evt))
                 .Where(evt => ShouldIncludeTimelineDamageEvent(replay, evt))
-                .OrderBy(evt => GetDamageTime(evt))
+                .OrderBy(evt => GetDamageTime(replay, evt))
                 .ToList();
 
             if (events.Count == 0)
@@ -1045,7 +1045,7 @@ public partial class FortniteReplayAnalyzer
                 running += evt.Magnitude ?? 0F;
                 points.Add(new DamageTimelinePoint
                 {
-                    TimeValue = GetDamageTime(evt),
+                    TimeValue = GetDamageTime(replay, evt),
                     Damage = _chkTimelineCumulative?.Checked == true ? running : evt.Magnitude ?? 0F
                 });
             }
@@ -1139,9 +1139,9 @@ public partial class FortniteReplayAnalyzer
         return snapshot;
     }
 
-    private static void AccumulateFightPhaseDamage(ReplayCombatSnapshot snapshot, DamageEvent evt, float amount)
+    private void AccumulateFightPhaseDamage(ReplayCombatSnapshot snapshot, DamageEvent evt, float amount)
     {
-        var time = GetDamageTime(evt);
+        var time = GetDamageTime(snapshot.Replay, evt);
         if (time <= 300)
         {
             snapshot.EarlyFightDamage += amount;
