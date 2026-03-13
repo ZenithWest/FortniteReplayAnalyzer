@@ -44,6 +44,22 @@ public partial class FortniteReplayAnalyzer
     private List<WeaponStatsRow> _lastWeaponStatsRows = [];
     private readonly ToolTip _graphToolTip = new();
 
+    private sealed class ReplayCombatSnapshot
+    {
+        public required FortniteReplay Replay { get; init; }
+        public required PlayerData Owner { get; init; }
+        public int Kills { get; set; }
+        public float PlayerDamage { get; set; }
+        public float BotDamage { get; set; }
+        public float StructureDamage { get; set; }
+        public int IncludedCombatEventCount { get; set; }
+        public int IncludedCriticalCount { get; set; }
+        public float IncludedCombatDamage { get; set; }
+        public float EarlyFightDamage { get; set; }
+        public float MidFightDamage { get; set; }
+        public float LateFightDamage { get; set; }
+    }
+
     private void InitializeAdvancedAnalysisUi()
     {
         _mainTabs = new TabControl
@@ -607,9 +623,7 @@ public partial class FortniteReplayAnalyzer
 
         foreach (var evt in replay.DamageEvents.Where(evt => IsDamageByPlayer(owner, evt)))
         {
-            var category = IsLikelyStructureDamageEvent(evt)
-                ? DamageParticipantCategory.Structure
-                : ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
+            var category = GetDamageEventTargetCategory(replay, evt);
             var weaponType = GetWeaponStatsTypeLabel(replay, evt);
             var weaponName = GetWeaponStatsNameLabel(replay, evt);
             if (string.IsNullOrWhiteSpace(weaponType) || string.Equals(weaponType, "Unknown", StringComparison.OrdinalIgnoreCase))
@@ -650,11 +664,8 @@ public partial class FortniteReplayAnalyzer
                     accumulator.HitsToBots++;
                     accumulator.DamageToBots += magnitude;
                     break;
-                case DamageParticipantCategory.Npc:
-                    accumulator.HitsToNpcs++;
-                    accumulator.DamageToNpcs += magnitude;
-                    break;
                 case DamageParticipantCategory.Structure:
+                default:
                     accumulator.HitsToStructures++;
                     accumulator.DamageToStructures += magnitude;
                     break;
@@ -929,8 +940,9 @@ public partial class FortniteReplayAnalyzer
     {
         var loadedRows = rows.Where(row => row.Replay is not null).ToList();
         var owners = loadedRows
-            .Select(row => new { Row = row, Replay = row.Replay!, Owner = GetReplayOwner(row.Replay!) })
-            .Where(x => x.Owner is not null)
+            .Select(row => BuildReplayCombatSnapshot(row, includeBotKills))
+            .Where(snapshot => snapshot is not null)
+            .Select(snapshot => snapshot!)
             .ToList();
 
         if (owners.Count == 0)
@@ -939,34 +951,19 @@ public partial class FortniteReplayAnalyzer
             yield break;
         }
 
-        var placements = owners.Select(x => x.Owner!.Placement ?? (int?)x.Replay.TeamStats?.Position).Where(x => x.HasValue).Select(x => x!.Value).ToList();
-        var kills = owners
-            .Select(x => CountReplayEliminations(x.Replay, x.Owner!, includeBotKills))
-            .ToList();
-        var damages = owners.Select(x => (double)(x.Replay.Stats?.DamageToPlayers ?? 0)).ToList();
+        var placements = owners.Select(x => x.Owner.Placement ?? (int?)x.Replay.TeamStats?.Position).Where(x => x.HasValue).Select(x => x!.Value).ToList();
+        var kills = owners.Select(x => x.Kills).ToList();
+        var playerDamagePerReplay = owners.Select(x => (double)x.PlayerDamage).ToList();
         var damageTaken = owners.Select(x => (double)(x.Replay.Stats?.DamageTaken ?? 0)).ToList();
         var accuracies = owners.Select(x => (double)(x.Replay.Stats?.Accuracy ?? 0)).ToList();
-        var combatDamageEvents = owners
-            .SelectMany(x => x.Replay.DamageEvents
-                .Where(evt => IsDamageByPlayer(x.Owner!, evt))
-                .Where(evt => IsCombatDamageParticipant(ClassifyDamageParticipant(x.Replay, evt.TargetId, evt.TargetName, evt.TargetIsBot)))
-                .Where(evt => includeBotKills || ClassifyDamageParticipant(x.Replay, evt.TargetId, evt.TargetName, evt.TargetIsBot) != DamageParticipantCategory.Bot)
-                .Select(evt => new
-                {
-                    Replay = x.Replay,
-                    Event = evt
-                }))
-            .ToList();
-        var critCount = combatDamageEvents.Count(x => x.Event.IsCritical == true);
-        var playerDamageTotal = combatDamageEvents
-            .Where(x => ClassifyDamageParticipant(x.Replay, x.Event.TargetId, x.Event.TargetName, x.Event.TargetIsBot) == DamageParticipantCategory.Player)
-            .Sum(x => x.Event.Magnitude ?? 0F);
-        var botDamageTotal = combatDamageEvents
-            .Where(x => ClassifyDamageParticipant(x.Replay, x.Event.TargetId, x.Event.TargetName, x.Event.TargetIsBot) == DamageParticipantCategory.Bot)
-            .Sum(x => x.Event.Magnitude ?? 0F);
+        var totalCombatEventCount = owners.Sum(x => x.IncludedCombatEventCount);
+        var totalCritCount = owners.Sum(x => x.IncludedCriticalCount);
+        var totalIncludedDamage = owners.Sum(x => x.IncludedCombatDamage);
+        var playerDamageTotal = owners.Sum(x => x.PlayerDamage);
+        var botDamageTotal = owners.Sum(x => x.BotDamage);
         yield return new DetailRow("Matches", owners.Count.ToString(CultureInfo.CurrentCulture));
         yield return new DetailRow("Wins", placements.Count(place => place == 1).ToString(CultureInfo.CurrentCulture));
-        yield return new DetailRow("Win Rate", $"{owners.Count(place => place.Owner!.Placement == 1) / (double)owners.Count * 100:0.0}%");
+        yield return new DetailRow("Win Rate", $"{owners.Count(place => place.Owner.Placement == 1) / (double)owners.Count * 100:0.0}%");
         yield return new DetailRow("Avg Placement", placements.Count == 0 ? "-" : $"{placements.Average():0.0}");
         yield return new DetailRow("Median Placement", placements.Count == 0 ? "-" : $"{placements.OrderBy(x => x).ElementAt(placements.Count / 2)}");
         yield return new DetailRow("Top 3 Rate", $"{placements.Count(place => place <= 3) / (double)Math.Max(1, placements.Count) * 100:0.0}%");
@@ -974,12 +971,12 @@ public partial class FortniteReplayAnalyzer
         yield return new DetailRow("Total Eliminations", kills.Sum().ToString(CultureInfo.CurrentCulture));
         yield return new DetailRow("Avg Eliminations", $"{kills.Average():0.0}");
         yield return new DetailRow("Best Elim Game", kills.Max().ToString(CultureInfo.CurrentCulture));
-        yield return new DetailRow("Avg Damage To Players", $"{damages.Average():0.0}");
+        yield return new DetailRow("Avg Damage To Players", $"{playerDamagePerReplay.Average():0.0}");
         yield return new DetailRow("Avg Damage Taken", $"{damageTaken.Average():0.0}");
         yield return new DetailRow("Avg Accuracy", $"{accuracies.Average():0.0}%");
-        yield return new DetailRow("Critical Hit Rate", combatDamageEvents.Count == 0 ? "-" : $"{critCount / (double)combatDamageEvents.Count * 100:0.0}%");
-        yield return new DetailRow("Avg Damage Events Logged", $"{combatDamageEvents.Count / (double)Math.Max(1, owners.Count):0.0}");
-        yield return new DetailRow("Avg Hit Damage", combatDamageEvents.Count == 0 ? "-" : $"{combatDamageEvents.Average(x => x.Event.Magnitude ?? 0F):0.0}");
+        yield return new DetailRow("Critical Hit Rate", totalCombatEventCount == 0 ? "-" : $"{totalCritCount / (double)totalCombatEventCount * 100:0.0}%");
+        yield return new DetailRow("Avg Damage Events Logged", $"{totalCombatEventCount / (double)Math.Max(1, owners.Count):0.0}");
+        yield return new DetailRow("Avg Hit Damage", totalCombatEventCount == 0 ? "-" : $"{totalIncludedDamage / totalCombatEventCount:0.0}");
         yield return new DetailRow("Avg Logged Damage To Bots", $"{botDamageTotal / Math.Max(1, owners.Count):0.0}");
         yield return new DetailRow("Avg Logged Damage To Players", $"{playerDamageTotal / Math.Max(1, owners.Count):0.0}");
         yield return new DetailRow("Avg Revives", $"{owners.Sum(x => x.Replay.Stats?.Revives ?? 0) / (double)Math.Max(1, owners.Count):0.0}");
@@ -987,13 +984,13 @@ public partial class FortniteReplayAnalyzer
         yield return new DetailRow("Avg Materials Gathered", $"{owners.Sum(x => x.Replay.Stats?.MaterialsGathered ?? 0) / (double)Math.Max(1, owners.Count):0.0}");
         yield return new DetailRow("Avg Materials Used", $"{owners.Sum(x => x.Replay.Stats?.MaterialsUsed ?? 0) / (double)Math.Max(1, owners.Count):0.0}");
         yield return new DetailRow("Avg Distance Travelled", $"{owners.Sum(x => x.Replay.Stats?.TotalTraveled ?? 0) / 100.0 / Math.Max(1, owners.Count):0.0} m");
-        yield return new DetailRow("Avg Early Fight Damage (0-5m)", $"{combatDamageEvents.Where(x => GetDamageTime(x.Event) <= 300).Sum(x => x.Event.Magnitude ?? 0F) / Math.Max(1, owners.Count):0.0}");
-        yield return new DetailRow("Avg Mid Fight Damage (5-12m)", $"{combatDamageEvents.Where(x => GetDamageTime(x.Event) > 300 && GetDamageTime(x.Event) <= 720).Sum(x => x.Event.Magnitude ?? 0F) / Math.Max(1, owners.Count):0.0}");
-        yield return new DetailRow("Avg Late Fight Damage (12m+)", $"{combatDamageEvents.Where(x => GetDamageTime(x.Event) > 720).Sum(x => x.Event.Magnitude ?? 0F) / Math.Max(1, owners.Count):0.0}");
+        yield return new DetailRow("Avg Early Fight Damage (0-5m)", $"{owners.Sum(x => x.EarlyFightDamage) / Math.Max(1, owners.Count):0.0}");
+        yield return new DetailRow("Avg Mid Fight Damage (5-12m)", $"{owners.Sum(x => x.MidFightDamage) / Math.Max(1, owners.Count):0.0}");
+        yield return new DetailRow("Avg Late Fight Damage (12m+)", $"{owners.Sum(x => x.LateFightDamage) / Math.Max(1, owners.Count):0.0}");
         yield return new DetailRow(
             "Longest Elimination Distance",
             $"{owners.SelectMany(ownerRow => ownerRow.Replay.KillFeed
-                    .Where(entry => ResolveKillFeedActorReference(ownerRow.Replay, entry).Player?.PlayerId == ownerRow.Owner!.PlayerId && entry.Distance.HasValue)
+                    .Where(entry => ResolveKillFeedActorReference(ownerRow.Replay, entry).Player?.PlayerId == ownerRow.Owner.PlayerId && entry.Distance.HasValue)
                     .Where(entry => includeBotKills || !(FindPlayer(ownerRow.Replay, entry.PlayerId, entry.PlayerName)?.IsBot ?? entry.PlayerIsBot))
                     .Select(entry => entry.Distance!.Value / 100.0))
                 .DefaultIfEmpty(0)
@@ -1063,29 +1060,99 @@ public partial class FortniteReplayAnalyzer
     {
         foreach (var row in rows.Where(x => x.Replay is not null))
         {
-            var replay = row.Replay!;
-            var owner = GetReplayOwner(replay);
-            if (owner is null)
+            var snapshot = BuildReplayCombatSnapshot(row, includeBotKills);
+            if (snapshot is null)
             {
                 continue;
             }
 
-            var combatDamage = replay.DamageEvents
-                .Where(evt => IsDamageByPlayer(owner, evt))
-                .Where(evt => IsCombatDamageParticipant(ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot)))
-                .Where(evt => includeBotKills || ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot) != DamageParticipantCategory.Bot)
-                .Sum(evt => evt.Magnitude ?? 0F);
-
-            var kills = replay.KillFeed
-                .Where(entry => MatchesResolvedKillFeedActor(replay, owner, entry) && !entry.IsRevived && !entry.IsDowned)
-                .Count(entry => includeBotKills || !(FindPlayer(replay, entry.PlayerId, entry.PlayerName)?.IsBot ?? entry.PlayerIsBot));
-
             yield return new MatchTrendRow
             {
                 Label = BuildTrendLabel(row),
-                DamageToPlayersAndBots = combatDamage,
-                Kills = kills
+                DamageToPlayersAndBots = snapshot.IncludedCombatDamage,
+                Kills = snapshot.Kills
             };
+        }
+    }
+
+    private ReplayCombatSnapshot? BuildReplayCombatSnapshot(ReplayBrowserRow row, bool includeBotKills)
+    {
+        var replay = row.Replay;
+        if (replay is null)
+        {
+            return null;
+        }
+
+        var owner = GetReplayOwner(replay);
+        if (owner is null)
+        {
+            return null;
+        }
+
+        var snapshot = new ReplayCombatSnapshot
+        {
+            Replay = replay,
+            Owner = owner,
+            Kills = CountReplayEliminations(replay, owner, includeBotKills)
+        };
+
+        foreach (var evt in replay.DamageEvents.Where(evt => IsDamageByPlayer(owner, evt)))
+        {
+            var amount = evt.Magnitude ?? 0F;
+            if (amount <= 0)
+            {
+                continue;
+            }
+
+            var category = GetDamageEventTargetCategory(replay, evt);
+            switch (category)
+            {
+                case DamageParticipantCategory.Player:
+                    snapshot.PlayerDamage += amount;
+                    snapshot.IncludedCombatDamage += amount;
+                    snapshot.IncludedCombatEventCount++;
+                    if (evt.IsCritical == true)
+                    {
+                        snapshot.IncludedCriticalCount++;
+                    }
+                    AccumulateFightPhaseDamage(snapshot, evt, amount);
+                    break;
+                case DamageParticipantCategory.Bot:
+                    snapshot.BotDamage += amount;
+                    if (includeBotKills)
+                    {
+                        snapshot.IncludedCombatDamage += amount;
+                        snapshot.IncludedCombatEventCount++;
+                        if (evt.IsCritical == true)
+                        {
+                            snapshot.IncludedCriticalCount++;
+                        }
+                        AccumulateFightPhaseDamage(snapshot, evt, amount);
+                    }
+                    break;
+                default:
+                    snapshot.StructureDamage += amount;
+                    break;
+            }
+        }
+
+        return snapshot;
+    }
+
+    private static void AccumulateFightPhaseDamage(ReplayCombatSnapshot snapshot, DamageEvent evt, float amount)
+    {
+        var time = GetDamageTime(evt);
+        if (time <= 300)
+        {
+            snapshot.EarlyFightDamage += amount;
+        }
+        else if (time <= 720)
+        {
+            snapshot.MidFightDamage += amount;
+        }
+        else
+        {
+            snapshot.LateFightDamage += amount;
         }
     }
 
@@ -1104,7 +1171,7 @@ public partial class FortniteReplayAnalyzer
 
     private bool ShouldIncludeTimelineDamageEvent(FortniteReplay replay, DamageEvent evt)
     {
-        var category = ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot);
+        var category = GetDamageEventTargetCategory(replay, evt);
 
         return category switch
         {

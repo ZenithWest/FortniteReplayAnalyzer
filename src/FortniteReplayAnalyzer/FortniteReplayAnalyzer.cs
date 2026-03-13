@@ -1143,11 +1143,8 @@ public partial class FortniteReplayAnalyzer : Form
         var attacker = FindPlayer(replay, evt.InstigatorId, evt.InstigatorName);
         var target = FindPlayer(replay, evt.TargetId, evt.TargetName);
         var timeValue = GetDamageTime(evt);
-        var likelyStructureDamage = IsLikelyStructureDamageEvent(evt);
-        var attackerCategory = ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot, false);
-        var targetCategory = likelyStructureDamage
-            ? DamageParticipantCategory.Structure
-            : ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot, evt.UsesNonPlayerTarget);
+        var attackerCategory = GetDamageEventInstigatorCategory(replay, evt);
+        var targetCategory = GetDamageEventTargetCategory(replay, evt);
         var ownerTeamIndex = GetReplayOwner(replay)?.TeamIndex;
         var attackerIsTeammate = ownerTeamIndex.HasValue && attacker?.TeamIndex == ownerTeamIndex;
         var targetIsTeammate = ownerTeamIndex.HasValue && target?.TeamIndex == ownerTeamIndex;
@@ -1160,8 +1157,8 @@ public partial class FortniteReplayAnalyzer : Form
             AttackerName = ResolveCombatantName(attacker, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot),
             AttackerId = attacker?.Id ?? evt.InstigatorId,
             AttackerLookupKey = attacker?.PlayerId ?? evt.InstigatorName,
-            TargetIcon = likelyStructureDamage ? null : GetPlayerSkinIcon(target),
-            TargetName = likelyStructureDamage
+            TargetIcon = targetCategory == DamageParticipantCategory.Structure ? null : GetPlayerSkinIcon(target),
+            TargetName = targetCategory == DamageParticipantCategory.Structure
                 ? ResolveCombatantName(null, evt.TargetId, null, false)
                 : ResolveCombatantName(target, evt.TargetId, evt.TargetName, evt.TargetIsBot),
             TargetId = target?.Id ?? evt.TargetId,
@@ -2714,19 +2711,15 @@ public partial class FortniteReplayAnalyzer : Form
             return false;
         }
 
-        var category = IsLikelyStructureDamageEvent(evt)
-            ? DamageParticipantCategory.Structure
-            : ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot, evt.UsesNonPlayerTarget);
+        var category = GetDamageEventTargetCategory(replay, evt);
         return IsDamageCategoryEnabled(category, _chkDamagePlayers, _chkDamageBots, _chkDamageStructures, _chkDamageNpcs);
     }
 
     private bool ShouldIncludePlayerDamageEvent(FortniteReplay replay, PlayerData player, DamageEvent evt)
     {
         var category = MatchesPlayer(player, evt.InstigatorId, evt.InstigatorName)
-            ? (IsLikelyStructureDamageEvent(evt)
-                ? DamageParticipantCategory.Structure
-                : ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot, evt.UsesNonPlayerTarget))
-            : ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot, false);
+            ? GetDamageEventTargetCategory(replay, evt)
+            : GetDamageEventParticipantCategory(replay, evt, false);
 
         return IsDamageCategoryEnabled(category, _chkPlayerDamagePlayers, _chkPlayerDamageBots, _chkPlayerDamageStructures, _chkPlayerDamageNpcs);
     }
@@ -2830,6 +2823,28 @@ public partial class FortniteReplayAnalyzer : Form
             || magnitude == 62.5F
             || magnitude == 100F
             || magnitude == 125F;
+    }
+
+    private DamageParticipantCategory GetDamageEventTargetCategory(FortniteReplay replay, DamageEvent evt)
+    {
+        if (IsLikelyStructureDamageEvent(evt))
+        {
+            return DamageParticipantCategory.Structure;
+        }
+
+        return ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot, evt.UsesNonPlayerTarget);
+    }
+
+    private DamageParticipantCategory GetDamageEventInstigatorCategory(FortniteReplay replay, DamageEvent evt)
+    {
+        return ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot, false);
+    }
+
+    private DamageParticipantCategory GetDamageEventParticipantCategory(FortniteReplay replay, DamageEvent evt, bool targetPerspective)
+    {
+        return targetPerspective
+            ? GetDamageEventTargetCategory(replay, evt)
+            : GetDamageEventInstigatorCategory(replay, evt);
     }
 
     private void ApplySettingsToUi()
@@ -2999,11 +3014,7 @@ public partial class FortniteReplayAnalyzer : Form
                 continue;
             }
 
-            var category = targetPerspective
-                ? (IsLikelyStructureDamageEvent(evt)
-                    ? DamageParticipantCategory.Structure
-                    : ClassifyDamageParticipant(replay, evt.TargetId, evt.TargetName, evt.TargetIsBot, evt.UsesNonPlayerTarget))
-                : ClassifyDamageParticipant(replay, evt.InstigatorId, evt.InstigatorName, evt.InstigatorIsBot, false);
+            var category = GetDamageEventParticipantCategory(replay, evt, targetPerspective);
 
             switch (category)
             {
@@ -3013,7 +3024,6 @@ public partial class FortniteReplayAnalyzer : Form
                 case DamageParticipantCategory.Bot:
                     totals.Bots += amount;
                     break;
-                case DamageParticipantCategory.Npc:
                 default:
                     totals.Structures += amount;
                     break;
