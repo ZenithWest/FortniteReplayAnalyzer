@@ -160,3 +160,16 @@ internal sealed class ReplayViewCache
     public required Dictionary<string, PlayerViewCache> PlayerCaches { get; init; }
 }
 
+internal sealed class ReplayOwnerSummary
+{
+    public required PlayerData Owner { get; init; }
+    public int HitsGiven { get; init; }
+    public int HitsTaken { get; init; }
+    public float DamageToPlayers { get; init; }
+    public float DamageToBots { get; init; }
+    public float DamageToStructures { get; init; }
+    public float DamageTakenFromPlayers { get; init; }
+    public float DamageTakenFromBots { get; init; }
+    public float DamageTakenFromStructures { get; init; }
+}
+

@@ -43,6 +43,9 @@ public partial class FortniteReplayAnalyzer
     private List<(RectangleF Bounds, string Text)> _weaponKillPieHitRegions = [];
     private List<WeaponStatsRow> _lastWeaponStatsRows = [];
     private readonly ToolTip _graphToolTip = new();
+    private RectangleF _timelineChartBounds;
+    private RectangleF _overallDamageChartBounds;
+    private RectangleF _overallKillsChartBounds;
 
     private sealed class ReplayCombatSnapshot
     {
@@ -281,8 +284,10 @@ public partial class FortniteReplayAnalyzer
             "Damage Per Match",
             _overallTrendRows.Select(row => ((double)row.DamageToPlayersAndBots, row.Label)).ToList(),
             Color.FromArgb(52, 123, 220),
-            _overallDamageHitRegions);
+            _overallDamageHitRegions,
+            chartBounds => _overallDamageChartBounds = chartBounds);
         _overallDamageTrendPanel.MouseMove += (_, e) => UpdateGraphToolTip(_overallDamageTrendPanel, _overallDamageHitRegions, e.Location);
+        _overallDamageTrendPanel.MouseClick += (_, _) => OpenOverallTrendExplorer(true);
 
         _overallKillsTrendPanel = new Panel
         {
@@ -295,8 +300,10 @@ public partial class FortniteReplayAnalyzer
             "Kills Per Match",
             _overallTrendRows.Select(row => ((double)row.Kills, row.Label)).ToList(),
             Color.FromArgb(244, 124, 32),
-            _overallKillsHitRegions);
+            _overallKillsHitRegions,
+            chartBounds => _overallKillsChartBounds = chartBounds);
         _overallKillsTrendPanel.MouseMove += (_, e) => UpdateGraphToolTip(_overallKillsTrendPanel, _overallKillsHitRegions, e.Location);
+        _overallKillsTrendPanel.MouseClick += (_, _) => OpenOverallTrendExplorer(false);
 
         var content = new TableLayoutPanel
         {
@@ -352,6 +359,7 @@ public partial class FortniteReplayAnalyzer
         };
         _damageTimelinePanel.Paint += (_, e) => PaintDamageTimeline(e.Graphics, _damageTimelinePanel.ClientRectangle);
         _damageTimelinePanel.MouseMove += (_, e) => UpdateGraphToolTip(_damageTimelinePanel, _timelineHitRegions, e.Location);
+        _damageTimelinePanel.MouseClick += (_, _) => OpenDamageTimelineExplorer();
 
         var layout = new TableLayoutPanel
         {
@@ -788,6 +796,12 @@ public partial class FortniteReplayAnalyzer
 
     private string GetWeaponStatsNameLabel(FortniteReplay replay, DamageEvent evt)
     {
+        var rawSpecificName = GetMostSpecificWeaponIdentifier(evt);
+        if (!string.IsNullOrWhiteSpace(rawSpecificName))
+        {
+            return rawSpecificName;
+        }
+
         var specificName = GetMostSpecificWeaponLabel(evt);
         if (!string.IsNullOrWhiteSpace(specificName))
         {
@@ -802,6 +816,52 @@ public partial class FortniteReplayAnalyzer
 
         var nearbyKillFeedWeapon = InferWeaponLabelFromNearbyKillFeed(replay, evt);
         return string.IsNullOrWhiteSpace(nearbyKillFeedWeapon) ? "Unknown" : nearbyKillFeedWeapon;
+    }
+
+    private static string? GetMostSpecificWeaponIdentifier(DamageEvent evt)
+    {
+        foreach (var candidate in new[]
+                 {
+                     GetRawWeaponIdentifier(evt.WeaponAssetName),
+                     GetRawWeaponIdentifier(evt.WeaponClassName),
+                     GetRawWeaponIdentifier(evt.WeaponName)
+                 })
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                continue;
+            }
+
+            if (!IsGenericWeaponLabel(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? GetRawWeaponIdentifier(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var identifier = value.Trim();
+        var slashIndex = identifier.LastIndexOf('/');
+        if (slashIndex >= 0 && slashIndex < identifier.Length - 1)
+        {
+            identifier = identifier[(slashIndex + 1)..];
+        }
+
+        var dotIndex = identifier.LastIndexOf('.');
+        if (dotIndex >= 0 && dotIndex < identifier.Length - 1)
+        {
+            identifier = identifier[(dotIndex + 1)..];
+        }
+
+        return string.IsNullOrWhiteSpace(identifier) ? null : identifier;
     }
 
     private static string NormalizeWeaponCategory(string? value)
@@ -1024,7 +1084,7 @@ public partial class FortniteReplayAnalyzer
             selectedPlayers.AddRange(teamMates);
         }
 
-        foreach (var player in selectedPlayers.DistinctBy(player => player.PlayerId))
+        foreach (var player in selectedPlayers.DistinctBy(GetPlayerCacheKey))
         {
             var events = replay.DamageEvents
                 .Where(evt => IsDamageByPlayer(player, evt))
@@ -1032,13 +1092,15 @@ public partial class FortniteReplayAnalyzer
                 .OrderBy(evt => GetDamageTime(replay, evt))
                 .ToList();
 
-            if (events.Count == 0)
-            {
-                continue;
-            }
-
             var running = 0F;
-            var points = new List<DamageTimelinePoint>();
+            var points = new List<DamageTimelinePoint>
+            {
+                new()
+                {
+                    TimeValue = 0D,
+                    Damage = 0F
+                }
+            };
 
             foreach (var evt in events)
             {
@@ -1202,7 +1264,8 @@ public partial class FortniteReplayAnalyzer
         using var font = new Font("Segoe UI", 8.5F);
         using var smallFont = new Font("Segoe UI", 8F);
 
-        var chartBounds = Rectangle.FromLTRB(bounds.Left + 48, bounds.Top + 16, bounds.Right - 12, bounds.Bottom - 58);
+        var chartBounds = Rectangle.FromLTRB(bounds.Left + 48, bounds.Top + 16, bounds.Right - 12, bounds.Bottom - 74);
+        _timelineChartBounds = chartBounds;
         if (chartBounds.Width <= 10 || chartBounds.Height <= 10)
         {
             return;
@@ -1293,7 +1356,12 @@ public partial class FortniteReplayAnalyzer
             }
 
             using var legendBrush = new SolidBrush(color);
-            graphics.DrawString(series.Name, smallFont, legendBrush, chartBounds.Left + 8 + (i * 120), bounds.Bottom - 42);
+            var legendSlotWidth = Math.Max(140F, chartBounds.Width / 2F);
+            var legendColumn = i % 2;
+            var legendRow = i / 2;
+            var legendX = chartBounds.Left + 8 + (legendColumn * legendSlotWidth);
+            var legendY = bounds.Bottom - 58 + (legendRow * 16F);
+            graphics.DrawString(series.Name, smallFont, legendBrush, legendX, legendY);
         }
 
         var axisLabel = "Match Time";
@@ -1301,7 +1369,7 @@ public partial class FortniteReplayAnalyzer
         graphics.DrawString(axisLabel, font, textBrush, chartBounds.Left + (chartBounds.Width - axisLabelSize.Width) / 2F, bounds.Bottom - 20);
     }
 
-    private static void PaintOverallTrendChart(Graphics graphics, Rectangle bounds, string title, List<(double Value, string Label)> values, Color barColor, List<(RectangleF Bounds, string Text)> hitRegions)
+    private static void PaintOverallTrendChart(Graphics graphics, Rectangle bounds, string title, List<(double Value, string Label)> values, Color barColor, List<(RectangleF Bounds, string Text)> hitRegions, Action<RectangleF>? chartBoundsCallback = null)
     {
         hitRegions.Clear();
         graphics.Clear(Color.White);
@@ -1313,6 +1381,7 @@ public partial class FortniteReplayAnalyzer
         using var barBrush = new SolidBrush(barColor);
 
         var chart = Rectangle.FromLTRB(bounds.Left + 56, bounds.Top + 24, bounds.Right - 18, bounds.Bottom - 76);
+        chartBoundsCallback?.Invoke(chart);
         graphics.DrawString(title, titleFont, textBrush, bounds.Left + 12, bounds.Top + 4);
         PaintVerticalBarChart(graphics, chart, values, barBrush, axisPen, gridPen, textBrush, font, hitRegions);
     }
@@ -1413,7 +1482,147 @@ public partial class FortniteReplayAnalyzer
             return;
         }
 
+        if (ReferenceEquals(control, _damageTimelinePanel) && _timelineChartBounds.Contains(location))
+        {
+            _graphToolTip.SetToolTip(control, BuildTimelineHoverText(location));
+            return;
+        }
+
+        if (ReferenceEquals(control, _overallDamageTrendPanel) && _overallDamageChartBounds.Contains(location))
+        {
+            _graphToolTip.SetToolTip(control, BuildOverallTrendHoverText(location, true));
+            return;
+        }
+
+        if (ReferenceEquals(control, _overallKillsTrendPanel) && _overallKillsChartBounds.Contains(location))
+        {
+            _graphToolTip.SetToolTip(control, BuildOverallTrendHoverText(location, false));
+            return;
+        }
+
         var hit = hitRegions.LastOrDefault(region => region.Bounds.Contains(location));
         _graphToolTip.SetToolTip(control, string.IsNullOrWhiteSpace(hit.Text) ? string.Empty : hit.Text);
+    }
+
+    private string BuildTimelineHoverText(Point location)
+    {
+        if (_timelineSeries.Count == 0 || _timelineChartBounds.Width <= 0)
+        {
+            return string.Empty;
+        }
+
+        var maxTime = Math.Max(1D, _timelineSeries.SelectMany(series => series.Points).DefaultIfEmpty(new DamageTimelinePoint()).Max(point => point.TimeValue));
+        var timeValue = ((location.X - _timelineChartBounds.Left) / _timelineChartBounds.Width) * maxTime;
+        timeValue = Math.Max(0D, Math.Min(maxTime, timeValue));
+
+        var lines = new List<string> { FormatMatchClock(timeValue) };
+        if (_chkTimelineCumulative?.Checked == true)
+        {
+            foreach (var series in _timelineSeries)
+            {
+                lines.Add($"{series.Name}: {GetTimelineInterpolatedValue(series.Points, timeValue):0.#}");
+            }
+        }
+        else
+        {
+            foreach (var series in _timelineSeries)
+            {
+                lines.Add($"{series.Name}: {GetTimelineNearestValue(series.Points, timeValue):0.#}");
+            }
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private string BuildOverallTrendHoverText(Point location, bool isDamageChart)
+    {
+        var bounds = isDamageChart ? _overallDamageChartBounds : _overallKillsChartBounds;
+        if (_overallTrendRows.Count == 0 || bounds.Width <= 0)
+        {
+            return string.Empty;
+        }
+
+        var barWidth = Math.Max(12F, (bounds.Width - 16F) / Math.Max(1, _overallTrendRows.Count) - 8F);
+        var index = (int)Math.Floor((location.X - bounds.Left - 8F) / (barWidth + 8F));
+        index = Math.Max(0, Math.Min(_overallTrendRows.Count - 1, index));
+        var row = _overallTrendRows[index];
+        var value = isDamageChart ? row.DamageToPlayersAndBots : row.Kills;
+        return $"{row.Label.Replace('\n', ' ')}{Environment.NewLine}{value:0.#}";
+    }
+
+    private static float GetTimelineInterpolatedValue(List<DamageTimelinePoint> points, double timeValue)
+    {
+        if (points.Count == 0)
+        {
+            return 0F;
+        }
+
+        if (timeValue <= points[0].TimeValue)
+        {
+            return points[0].Damage;
+        }
+
+        for (var i = 1; i < points.Count; i++)
+        {
+            if (timeValue > points[i].TimeValue)
+            {
+                continue;
+            }
+
+            var previous = points[i - 1];
+            var current = points[i];
+            var delta = current.TimeValue - previous.TimeValue;
+            if (delta <= 0D)
+            {
+                return current.Damage;
+            }
+
+            var ratio = (float)((timeValue - previous.TimeValue) / delta);
+            return previous.Damage + ((current.Damage - previous.Damage) * ratio);
+        }
+
+        return points[^1].Damage;
+    }
+
+    private static float GetTimelineNearestValue(List<DamageTimelinePoint> points, double timeValue)
+    {
+        if (points.Count == 0)
+        {
+            return 0F;
+        }
+
+        return points.OrderBy(point => Math.Abs(point.TimeValue - timeValue)).First().Damage;
+    }
+
+    private void OpenDamageTimelineExplorer()
+    {
+        if (_selectedReplayRow is null || _timelineSeries.Count == 0)
+        {
+            return;
+        }
+
+        GraphExplorerForm.CreateTimeline(
+            $"Damage Timeline - {_selectedReplayRow.FileName}",
+            _timelineSeries,
+            _chkTimelineCumulative?.Checked == true).Show(this);
+    }
+
+    private void OpenOverallTrendExplorer(bool isDamageChart)
+    {
+        if (_overallTrendRows.Count == 0)
+        {
+            return;
+        }
+
+        var title = isDamageChart ? "Overall Damage Per Match" : "Overall Kills Per Match";
+        var points = _overallTrendRows
+            .Select((row, index) => new GraphExplorerPoint
+            {
+                Label = row.Label,
+                XValue = index,
+                Value = isDamageChart ? row.DamageToPlayersAndBots : row.Kills
+            })
+            .ToList();
+        GraphExplorerForm.CreateBar(title, points, isDamageChart ? Color.FromArgb(52, 123, 220) : Color.FromArgb(244, 124, 32)).Show(this);
     }
 }

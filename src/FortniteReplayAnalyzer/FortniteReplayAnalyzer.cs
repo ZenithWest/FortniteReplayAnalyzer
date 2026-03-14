@@ -57,6 +57,7 @@ public partial class FortniteReplayAnalyzer : Form
     private TabControl? _openedReplayTabs;
     private TabControl? _centerPanelTabs;
     private TabControl? _playerPanelTabs;
+    private TabControl? _playerSubjectTabs;
     private Label? _lblReplayHideHint;
     private ContextMenuStrip? _replayBrowserContextMenu;
     private ToolStripMenuItem? _loadReplayMenuItem;
@@ -75,6 +76,7 @@ public partial class FortniteReplayAnalyzer : Form
     private bool _replayDragSelectionChanged;
     private int _replayDragStartIndex = -1;
     private bool _replayRowsRefreshPending;
+    private bool _suppressPlayerSubjectTabSelection;
 
     private string ReplayFolder => string.IsNullOrWhiteSpace(_settings.DefaultReplaysFolder) ? DefaultReplayFolder : _settings.DefaultReplaysFolder;
 
@@ -284,9 +286,23 @@ public partial class FortniteReplayAnalyzer : Form
             Multiline = false,
             Padding = new Point(14, 4)
         };
+        _playerSubjectTabs = new TabControl
+        {
+            Dock = DockStyle.Fill,
+            HotTrack = true,
+            Multiline = false,
+            Padding = new Point(12, 4)
+        };
+        _playerSubjectTabs.SelectedIndexChanged += (_, _) => HandlePlayerSubjectTabSelectionChanged();
         playerContentLayout.Parent?.Controls.Remove(playerContentLayout);
         playerPanelLayout.Controls.Remove(playerContentLayout);
-        playerPanelLayout.Controls.Add(_playerPanelTabs, 0, 1);
+        playerPanelLayout.RowCount = 3;
+        playerPanelLayout.RowStyles.Clear();
+        playerPanelLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 82F));
+        playerPanelLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        playerPanelLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        playerPanelLayout.Controls.Add(_playerSubjectTabs, 0, 1);
+        playerPanelLayout.Controls.Add(_playerPanelTabs, 0, 2);
         AddPanelTab(_playerPanelTabs, "Overview", grpPlayerOverview);
         AddPanelTab(_playerPanelTabs, "Kill Log", grpPlayerCombatLog);
         AddPanelTab(_playerPanelTabs, "Eliminated Players", grpPlayerVictims);
@@ -871,6 +887,7 @@ public partial class FortniteReplayAnalyzer : Form
         BuildKillFeed(row);
         BuildCombatEvents(row);
         BuildPlayerList(row);
+        PopulatePlayerSubjectTabs(row);
 
         var defaultPlayer = ResolveDefaultPlayer(row.Replay);
         ShowPlayerDetails(defaultPlayer);
@@ -1067,6 +1084,8 @@ public partial class FortniteReplayAnalyzer : Form
     {
         var replay = row.Replay!;
         var replayOwner = GetReplayOwner(replay);
+        var ownerSummary = replayOwner is null ? null : BuildReplayOwnerSummary(replay, replayOwner);
+        var ownerDamageTaken = ownerSummary is null ? 0F : ownerSummary.DamageTakenFromPlayers + ownerSummary.DamageTakenFromBots;
 
         yield return new DetailRow("Replay", row.FileName);
         yield return new DetailRow("Folder", Path.GetDirectoryName(row.FilePath) ?? "-");
@@ -1081,9 +1100,10 @@ public partial class FortniteReplayAnalyzer : Form
         yield return new DetailRow("Teams", FormatNullable(replay.GameData.TotalTeams));
         yield return new DetailRow("Team Size", FormatNullable(replay.GameData.TeamSize));
         yield return new DetailRow("Accuracy", replay.Stats is null ? "-" : $"{replay.Stats.Accuracy:0.#}%");
-        yield return new DetailRow("Damage To Players", FormatNullable(replay.Stats?.DamageToPlayers));
-        yield return new DetailRow("Damage Taken", FormatNullable(replay.Stats?.DamageTaken));
-        yield return new DetailRow("Recorded Hits", replay.DamageEvents.Count.ToString(CultureInfo.CurrentCulture));
+        yield return new DetailRow("Damage To Players", ownerSummary is null ? "-" : FormatDamageTotal(ownerSummary.DamageToPlayers));
+        yield return new DetailRow("Damage To Bots", ownerSummary is null ? "-" : FormatDamageTotal(ownerSummary.DamageToBots));
+        yield return new DetailRow("Damage Taken", ownerSummary is null ? "-" : FormatDamageTotal(ownerDamageTaken));
+        yield return new DetailRow("Recorded Hits", ownerSummary is null ? "-" : ownerSummary.HitsGiven.ToString(CultureInfo.CurrentCulture));
     }
 
     private void BuildKillFeed(ReplayBrowserRow row)
@@ -1280,6 +1300,11 @@ public partial class FortniteReplayAnalyzer : Form
 
     private void ShowPlayerDetails(PlayerData? player)
     {
+        ShowPlayerDetails(player, true);
+    }
+
+    private void ShowPlayerDetails(PlayerData? player, bool syncPlayerTabs)
+    {
         _selectedPlayer = player;
 
         if (_selectedReplayRow?.Replay is null || _selectedReplayRow.ViewCache is null || player is null)
@@ -1294,6 +1319,11 @@ public partial class FortniteReplayAnalyzer : Form
                 _dgvPlayerDamageLog.DataSource = new List<CombatEventRow>();
             }
             return;
+        }
+
+        if (syncPlayerTabs)
+        {
+            EnsurePlayerSubjectTab(player, true);
         }
 
         var playerCache = GetPlayerViewCache(_selectedReplayRow.ViewCache, player);
@@ -1357,6 +1387,74 @@ public partial class FortniteReplayAnalyzer : Form
         yield return new DetailRow("Damage Taken From Players", FormatDamageTotal(damageTaken.Players));
         yield return new DetailRow("Damage Taken From Bots", FormatDamageTotal(damageTaken.Bots));
         yield return new DetailRow("Damage Taken From Structures", FormatDamageTotal(damageTaken.Structures + damageTaken.Npcs));
+    }
+
+    private ReplayOwnerSummary BuildReplayOwnerSummary(FortniteReplay replay, PlayerData owner)
+    {
+        var hitsGiven = 0;
+        var hitsTaken = 0;
+        var damageToPlayers = 0F;
+        var damageToBots = 0F;
+        var damageToStructures = 0F;
+        var damageTakenFromPlayers = 0F;
+        var damageTakenFromBots = 0F;
+        var damageTakenFromStructures = 0F;
+
+        foreach (var evt in replay.DamageEvents)
+        {
+            var amount = evt.Magnitude ?? 0F;
+            if (amount <= 0F)
+            {
+                continue;
+            }
+
+            if (MatchesPlayer(owner, evt.InstigatorId, evt.InstigatorName))
+            {
+                hitsGiven++;
+                switch (GetDamageEventTargetCategory(replay, evt))
+                {
+                    case DamageParticipantCategory.Player:
+                        damageToPlayers += amount;
+                        break;
+                    case DamageParticipantCategory.Bot:
+                        damageToBots += amount;
+                        break;
+                    default:
+                        damageToStructures += amount;
+                        break;
+                }
+            }
+
+            if (MatchesPlayer(owner, evt.TargetId, evt.TargetName))
+            {
+                hitsTaken++;
+                switch (GetDamageEventInstigatorCategory(replay, evt))
+                {
+                    case DamageParticipantCategory.Player:
+                        damageTakenFromPlayers += amount;
+                        break;
+                    case DamageParticipantCategory.Bot:
+                        damageTakenFromBots += amount;
+                        break;
+                    default:
+                        damageTakenFromStructures += amount;
+                        break;
+                }
+            }
+        }
+
+        return new ReplayOwnerSummary
+        {
+            Owner = owner,
+            HitsGiven = hitsGiven,
+            HitsTaken = hitsTaken,
+            DamageToPlayers = damageToPlayers,
+            DamageToBots = damageToBots,
+            DamageToStructures = damageToStructures,
+            DamageTakenFromPlayers = damageTakenFromPlayers,
+            DamageTakenFromBots = damageTakenFromBots,
+            DamageTakenFromStructures = damageTakenFromStructures
+        };
     }
 
     private IEnumerable<KillFeedRow> BuildPlayerCombatLog(FortniteReplay replay, PlayerData player)
@@ -1436,6 +1534,7 @@ public partial class FortniteReplayAnalyzer : Form
         }
         lblSelectedPlayer.Text = "Select a player to inspect their stats.";
         lblPlayerPanelTitle.Text = "Player Stats";
+        _playerSubjectTabs?.TabPages.Clear();
     }
 
     private void BindReplayRows()
@@ -2631,6 +2730,92 @@ public partial class FortniteReplayAnalyzer : Form
                     : playerCache.DamageRows.Where(ShouldIncludePlayerDamageEventRow).ToList();
             }
         }
+    }
+
+    private void PopulatePlayerSubjectTabs(ReplayBrowserRow row)
+    {
+        if (_playerSubjectTabs is null || row.Replay is null)
+        {
+            return;
+        }
+
+        var owner = GetReplayOwner(row.Replay);
+        if (owner is null)
+        {
+            _playerSubjectTabs.TabPages.Clear();
+            return;
+        }
+
+        var players = row.Replay.PlayerData
+            .Where(player => player.TeamIndex == owner.TeamIndex || MatchesPlayer(owner, player.Id, player.PlayerId))
+            .DistinctBy(GetPlayerCacheKey)
+            .OrderByDescending(player => MatchesPlayer(owner, player.Id, player.PlayerId))
+            .ThenBy(player => ResolvePlayerName(player, player.Id, player.PlayerId))
+            .ToList();
+
+        _suppressPlayerSubjectTabSelection = true;
+        try
+        {
+            _playerSubjectTabs.TabPages.Clear();
+            foreach (var player in players)
+            {
+                _playerSubjectTabs.TabPages.Add(new TabPage(ResolvePlayerName(player, player.Id, player.PlayerId))
+                {
+                    Tag = player
+                });
+            }
+        }
+        finally
+        {
+            _suppressPlayerSubjectTabSelection = false;
+        }
+    }
+
+    private void EnsurePlayerSubjectTab(PlayerData player, bool selectTab)
+    {
+        if (_playerSubjectTabs is null)
+        {
+            return;
+        }
+
+        var existing = _playerSubjectTabs.TabPages
+            .Cast<TabPage>()
+            .FirstOrDefault(page => page.Tag is PlayerData pagePlayer
+                                    && string.Equals(GetPlayerCacheKey(pagePlayer), GetPlayerCacheKey(player), StringComparison.OrdinalIgnoreCase));
+
+        if (existing is null)
+        {
+            existing = new TabPage(ResolvePlayerName(player, player.Id, player.PlayerId))
+            {
+                Tag = player
+            };
+            _playerSubjectTabs.TabPages.Add(existing);
+        }
+
+        if (!selectTab)
+        {
+            return;
+        }
+
+        _suppressPlayerSubjectTabSelection = true;
+        try
+        {
+            _playerSubjectTabs.SelectedTab = existing;
+        }
+        finally
+        {
+            _suppressPlayerSubjectTabSelection = false;
+        }
+    }
+
+    private void HandlePlayerSubjectTabSelectionChanged()
+    {
+        if (_suppressPlayerSubjectTabSelection || _playerSubjectTabs?.SelectedTab?.Tag is not PlayerData player)
+        {
+            return;
+        }
+
+        ShowPlayerDetails(player, false);
     }
 
     private static PlayerViewCache? GetPlayerViewCache(ReplayViewCache viewCache, PlayerData player)
