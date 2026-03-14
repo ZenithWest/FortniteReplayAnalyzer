@@ -177,6 +177,8 @@ public partial class FortniteReplayAnalyzer
             _weaponKillPieHitRegions);
         _weaponDamageSharePanel.MouseMove += (_, e) => UpdateGraphToolTip(_weaponDamageSharePanel, _weaponDamagePieHitRegions, e.Location);
         _weaponKillSharePanel.MouseMove += (_, e) => UpdateGraphToolTip(_weaponKillSharePanel, _weaponKillPieHitRegions, e.Location);
+        _weaponDamageSharePanel.MouseClick += (_, _) => OpenWeaponShareExplorer(true);
+        _weaponKillSharePanel.MouseClick += (_, _) => OpenWeaponShareExplorer(false);
         pieChartsLayout.Controls.Add(_weaponDamageSharePanel, 0, 0);
         pieChartsLayout.Controls.Add(_weaponKillSharePanel, 1, 0);
 
@@ -822,6 +824,7 @@ public partial class FortniteReplayAnalyzer
     {
         foreach (var candidate in new[]
                  {
+                     GetRawWeaponIdentifier(evt.WeaponItemDefinition),
                      GetRawWeaponIdentifier(evt.WeaponAssetName),
                      GetRawWeaponIdentifier(evt.WeaponClassName),
                      GetRawWeaponIdentifier(evt.WeaponName)
@@ -1074,7 +1077,7 @@ public partial class FortniteReplayAnalyzer
         }
 
         var teamMates = replay.PlayerData?
-            .Where(player => player.TeamIndex == owner.TeamIndex && player.PlayerId != owner.PlayerId)
+            .Where(player => player.TeamIndex == owner.TeamIndex && !MatchesPlayer(owner, player.Id, player.PlayerId))
             .OrderBy(player => ResolvePlayerName(player, player.Id, player.PlayerId))
             .ToList() ?? [];
 
@@ -1264,7 +1267,10 @@ public partial class FortniteReplayAnalyzer
         using var font = new Font("Segoe UI", 8.5F);
         using var smallFont = new Font("Segoe UI", 8F);
 
-        var chartBounds = Rectangle.FromLTRB(bounds.Left + 48, bounds.Top + 16, bounds.Right - 12, bounds.Bottom - 74);
+        var legendRows = Math.Max(1, (int)Math.Ceiling(_timelineSeries.Count / 2D));
+        var legendHeight = legendRows * 18;
+        var bottomPadding = 42 + legendHeight;
+        var chartBounds = Rectangle.FromLTRB(bounds.Left + 48, bounds.Top + 16, bounds.Right - 12, bounds.Bottom - bottomPadding);
         _timelineChartBounds = chartBounds;
         if (chartBounds.Width <= 10 || chartBounds.Height <= 10)
         {
@@ -1360,13 +1366,13 @@ public partial class FortniteReplayAnalyzer
             var legendColumn = i % 2;
             var legendRow = i / 2;
             var legendX = chartBounds.Left + 8 + (legendColumn * legendSlotWidth);
-            var legendY = bounds.Bottom - 58 + (legendRow * 16F);
+            var legendY = chartBounds.Bottom + 28F + (legendRow * 16F);
             graphics.DrawString(series.Name, smallFont, legendBrush, legendX, legendY);
         }
 
         var axisLabel = "Match Time";
         var axisLabelSize = graphics.MeasureString(axisLabel, font);
-        graphics.DrawString(axisLabel, font, textBrush, chartBounds.Left + (chartBounds.Width - axisLabelSize.Width) / 2F, bounds.Bottom - 20);
+        graphics.DrawString(axisLabel, font, textBrush, chartBounds.Left + (chartBounds.Width - axisLabelSize.Width) / 2F, chartBounds.Bottom + 6);
     }
 
     private static void PaintOverallTrendChart(Graphics graphics, Rectangle bounds, string title, List<(double Value, string Label)> values, Color barColor, List<(RectangleF Bounds, string Text)> hitRegions, Action<RectangleF>? chartBoundsCallback = null)
@@ -1623,6 +1629,32 @@ public partial class FortniteReplayAnalyzer
                 Value = isDamageChart ? row.DamageToPlayersAndBots : row.Kills
             })
             .ToList();
+        GraphExplorerForm.CreateBar(title, points, isDamageChart ? Color.FromArgb(52, 123, 220) : Color.FromArgb(244, 124, 32)).Show(this);
+    }
+
+    private void OpenWeaponShareExplorer(bool isDamageChart)
+    {
+        if (_lastWeaponStatsRows.Count == 0)
+        {
+            return;
+        }
+
+        var title = isDamageChart ? "Weapon Damage Share" : "Weapon Kills/Downs Share";
+        var points = _lastWeaponStatsRows
+            .Where(row => isDamageChart ? row.AvgDamagePerMatch > 0F : row.AvgKillOrDownsPerMatch > 0F)
+            .Select((row, index) => new GraphExplorerPoint
+            {
+                Label = row.WeaponName,
+                XValue = index,
+                Value = isDamageChart ? row.AvgDamagePerMatch : row.AvgKillOrDownsPerMatch
+            })
+            .ToList();
+
+        if (points.Count == 0)
+        {
+            return;
+        }
+
         GraphExplorerForm.CreateBar(title, points, isDamageChart ? Color.FromArgb(52, 123, 220) : Color.FromArgb(244, 124, 32)).Show(this);
     }
 }

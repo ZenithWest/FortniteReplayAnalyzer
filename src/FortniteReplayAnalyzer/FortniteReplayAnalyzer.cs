@@ -1919,48 +1919,6 @@ public partial class FortniteReplayAnalyzer : Form
         return "Structure";
     }
 
-    private static string? GetMostSpecificWeaponIdentifier(DamageEvent evt)
-    {
-        foreach (var candidate in new[]
-                 {
-                     evt.WeaponItemDefinition,
-                     evt.WeaponAssetName,
-                     evt.WeaponClassName,
-                     evt.WeaponName
-                 })
-        {
-            var raw = GetRawWeaponIdentifier(candidate);
-            if (!string.IsNullOrWhiteSpace(raw))
-            {
-                return raw;
-            }
-        }
-
-        return null;
-    }
-
-    private static string? GetRawWeaponIdentifier(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        var trimmed = value.Trim();
-        if (string.Equals(trimmed, "Unknown", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        var markerIndex = trimmed.IndexOf("WID_", StringComparison.OrdinalIgnoreCase);
-        if (markerIndex >= 0)
-        {
-            return trimmed[markerIndex..];
-        }
-
-        return trimmed;
-    }
-
     private static string FormatWeaponType(DamageEvent evt)
     {
         var displayName = NormalizeWeaponDisplayLabel(evt.WeaponName);
