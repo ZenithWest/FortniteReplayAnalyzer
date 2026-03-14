@@ -39,6 +39,7 @@ public class FortniteReplayBuilder
     private readonly Dictionary<uint, Inventory> _inventories = new();
     private readonly Dictionary<uint, WeaponData> _weapons = new();
     private readonly Dictionary<uint, WeaponData> _unknownWeapons = new();
+    private readonly Dictionary<string, List<WeaponData>> _playerWeapons = new(StringComparer.OrdinalIgnoreCase);
 
     private float? ReplicatedWorldTimeSeconds = 0;
     private double? ReplicatedWorldTimeSecondsDouble = 0;
@@ -141,7 +142,12 @@ public class FortniteReplayBuilder
 
         if (ownedWeapons.Count == 0)
         {
-            return ResolveWeapon(player);
+            return GetAssociatedWeapons(player)
+                .OrderBy(weapon => Math.Abs((weapon.LastFireTimeVerified ?? 0F) - eventTime))
+                .ThenByDescending(weapon => weapon.LastFireTimeVerified ?? float.MinValue)
+                .ThenByDescending(weapon => weapon.bIsEquippingWeapon == true)
+                .FirstOrDefault()
+                ?? ResolveWeapon(player);
         }
 
         var bestTimedWeapon = ownedWeapons
@@ -159,7 +165,12 @@ public class FortniteReplayBuilder
             .OrderByDescending(weapon => weapon.bIsEquippingWeapon == true)
             .ThenByDescending(weapon => weapon.AmmoCount ?? int.MinValue)
             .ThenByDescending(weapon => weapon.WeaponLevel ?? int.MinValue)
-            .FirstOrDefault();
+            .FirstOrDefault()
+            ?? GetAssociatedWeapons(player)
+                .OrderBy(weapon => Math.Abs((weapon.LastFireTimeVerified ?? 0F) - eventTime))
+                .ThenByDescending(weapon => weapon.LastFireTimeVerified ?? float.MinValue)
+                .ThenByDescending(weapon => weapon.bIsEquippingWeapon == true)
+                .FirstOrDefault();
     }
 
     private HashSet<uint> GetPlayerActorIds(PlayerData player)
@@ -593,9 +604,11 @@ public class FortniteReplayBuilder
         newWeapon.D ??= weapon.D;
         newWeapon.WeaponAssetName ??= weapon.WeaponData?.Name;
         newWeapon.WeaponClassName ??= weapon.GetType().Name;
+        newWeapon.WeaponItemDefinition ??= ExtractWeaponItemDefinition(weapon.WeaponData?.Name);
         newWeapon.WeaponItemDefinition ??= ResolveWeaponItemDefinition(newWeapon);
         newWeapon.WeaponName ??= GetWeaponDisplayName(weapon.WeaponData?.Name, weapon.GetType().Name);
         newWeapon.WeaponType ??= NormalizeWeaponType(newWeapon.WeaponAssetName, newWeapon.WeaponClassName, newWeapon.WeaponName);
+        AssociateWeaponWithPlayer(newWeapon);
     }
 
     public void UpdateSafeZones(SafeZoneIndicator safeZone)
@@ -868,6 +881,17 @@ public class FortniteReplayBuilder
 
     private string? ResolveWeaponItemDefinition(WeaponData weapon)
     {
+        if (!string.IsNullOrWhiteSpace(weapon.WeaponItemDefinition))
+        {
+            return weapon.WeaponItemDefinition;
+        }
+
+        var exactFromAsset = ExtractWeaponItemDefinition(weapon.WeaponAssetName);
+        if (!string.IsNullOrWhiteSpace(exactFromAsset))
+        {
+            return exactFromAsset;
+        }
+
         PlayerData? ownerPlayer = null;
         if (weapon.OwnerActor.HasValue)
         {
@@ -956,7 +980,11 @@ public class FortniteReplayBuilder
                              || (weapon.InstigatorActor.HasValue && actorIds.Contains(weapon.InstigatorActor.Value)))
             .OrderByDescending(weapon => weapon.LastFireTimeVerified ?? float.MinValue)
             .ThenByDescending(weapon => weapon.bIsEquippingWeapon == true)
-            .FirstOrDefault();
+            .FirstOrDefault()
+            ?? GetAssociatedWeapons(player)
+                .OrderByDescending(weapon => weapon.LastFireTimeVerified ?? float.MinValue)
+                .ThenByDescending(weapon => weapon.bIsEquippingWeapon == true)
+                .FirstOrDefault();
     }
 
     private bool TryResolveWeaponByReference(uint? weaponReference, [NotNullWhen(true)] out WeaponData? weapon)
@@ -981,6 +1009,100 @@ public class FortniteReplayBuilder
         }
 
         return false;
+    }
+
+    private void AssociateWeaponWithPlayer(WeaponData weapon)
+    {
+        if (!TryGetOwningPlayer(weapon, out var player))
+        {
+            return;
+        }
+
+        var key = GetPlayerAssociationKey(player);
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        if (!_playerWeapons.TryGetValue(key, out var weapons))
+        {
+            weapons = new List<WeaponData>();
+            _playerWeapons[key] = weapons;
+        }
+
+        if (!weapons.Contains(weapon))
+        {
+            weapons.Add(weapon);
+        }
+    }
+
+    private IEnumerable<WeaponData> GetAssociatedWeapons(PlayerData player)
+    {
+        var key = GetPlayerAssociationKey(player);
+        if (string.IsNullOrWhiteSpace(key) || !_playerWeapons.TryGetValue(key, out var weapons))
+        {
+            return Enumerable.Empty<WeaponData>();
+        }
+
+        return weapons;
+    }
+
+    private bool TryGetOwningPlayer(WeaponData weapon, [NotNullWhen(true)] out PlayerData? player)
+    {
+        player = null;
+        if (weapon.OwnerActor.HasValue && TryGetPlayerDataFromActor(weapon.OwnerActor.Value, out player))
+        {
+            return true;
+        }
+
+        if (weapon.InstigatorActor.HasValue && TryGetPlayerDataFromActor(weapon.InstigatorActor.Value, out player))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string? GetPlayerAssociationKey(PlayerData? player)
+    {
+        if (player is null)
+        {
+            return null;
+        }
+
+        if (player.Id.HasValue)
+        {
+            return $"id:{player.Id.Value}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(player.PlayerId))
+        {
+            return $"player:{player.PlayerId}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(player.PlayerName))
+        {
+            return $"name:{player.PlayerName}";
+        }
+
+        return null;
+    }
+
+    private static string? ExtractWeaponItemDefinition(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        var markerIndex = trimmed.IndexOf("WID_", StringComparison.OrdinalIgnoreCase);
+        if (markerIndex >= 0)
+        {
+            return trimmed[markerIndex..];
+        }
+
+        return null;
     }
 
     private static string NormalizeWeaponType(string? weaponAssetName, string? weaponClassName, string? weaponDisplayName)
