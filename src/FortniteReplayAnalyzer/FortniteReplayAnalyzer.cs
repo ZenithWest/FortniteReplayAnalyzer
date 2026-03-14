@@ -291,7 +291,9 @@ public partial class FortniteReplayAnalyzer : Form
             Dock = DockStyle.Fill,
             HotTrack = true,
             Multiline = false,
-            Padding = new Point(12, 4)
+            Padding = new Point(12, 4),
+            SizeMode = TabSizeMode.Fixed,
+            ItemSize = new Size(140, 28)
         };
         _playerSubjectTabs.SelectedIndexChanged += (_, _) => HandlePlayerSubjectTabSelectionChanged();
         playerContentLayout.Parent?.Controls.Remove(playerContentLayout);
@@ -299,7 +301,7 @@ public partial class FortniteReplayAnalyzer : Form
         playerPanelLayout.RowCount = 3;
         playerPanelLayout.RowStyles.Clear();
         playerPanelLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 82F));
-        playerPanelLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+        playerPanelLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46F));
         playerPanelLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         playerPanelLayout.Controls.Add(_playerSubjectTabs, 0, 1);
         playerPanelLayout.Controls.Add(_playerPanelTabs, 0, 2);
@@ -1917,6 +1919,48 @@ public partial class FortniteReplayAnalyzer : Form
         return "Structure";
     }
 
+    private static string? GetMostSpecificWeaponIdentifier(DamageEvent evt)
+    {
+        foreach (var candidate in new[]
+                 {
+                     evt.WeaponItemDefinition,
+                     evt.WeaponAssetName,
+                     evt.WeaponClassName,
+                     evt.WeaponName
+                 })
+        {
+            var raw = GetRawWeaponIdentifier(candidate);
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                return raw;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? GetRawWeaponIdentifier(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        if (string.Equals(trimmed, "Unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var markerIndex = trimmed.IndexOf("WID_", StringComparison.OrdinalIgnoreCase);
+        if (markerIndex >= 0)
+        {
+            return trimmed[markerIndex..];
+        }
+
+        return trimmed;
+    }
+
     private static string FormatWeaponType(DamageEvent evt)
     {
         var displayName = NormalizeWeaponDisplayLabel(evt.WeaponName);
@@ -1954,7 +1998,9 @@ public partial class FortniteReplayAnalyzer : Form
 
     private string FormatCombatEventWeaponType(FortniteReplay replay, DamageEvent evt)
     {
-        var label = GetMostSpecificWeaponLabel(evt) ?? FormatWeaponType(evt);
+        var label = GetMostSpecificWeaponIdentifier(evt)
+                    ?? GetMostSpecificWeaponLabel(evt)
+                    ?? FormatWeaponType(evt);
         if (!string.Equals(label, "Unknown", StringComparison.OrdinalIgnoreCase))
         {
             return label;

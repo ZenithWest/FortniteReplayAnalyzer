@@ -10,6 +10,7 @@ public class WeaponData
     public string WeaponName { get; set; }
     public string WeaponAssetName { get; set; }
     public string WeaponClassName { get; set; }
+    public string WeaponItemDefinition { get; set; }
     public string WeaponType { get; set; }
     public float? LastFireTimeVerified { get; set; }
     public int? WeaponLevel { get; set; }

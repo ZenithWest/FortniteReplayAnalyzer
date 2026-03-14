@@ -98,6 +98,7 @@ public class FortniteReplayBuilder
 
             damageEvent.WeaponAssetName ??= weapon.WeaponAssetName;
             damageEvent.WeaponClassName ??= weapon.WeaponClassName;
+            damageEvent.WeaponItemDefinition ??= weapon.WeaponItemDefinition;
             damageEvent.WeaponName ??= weapon.WeaponName;
             damageEvent.WeaponType ??= weapon.WeaponType;
         }
@@ -592,6 +593,7 @@ public class FortniteReplayBuilder
         newWeapon.D ??= weapon.D;
         newWeapon.WeaponAssetName ??= weapon.WeaponData?.Name;
         newWeapon.WeaponClassName ??= weapon.GetType().Name;
+        newWeapon.WeaponItemDefinition ??= ResolveWeaponItemDefinition(newWeapon);
         newWeapon.WeaponName ??= GetWeaponDisplayName(weapon.WeaponData?.Name, weapon.GetType().Name);
         newWeapon.WeaponType ??= NormalizeWeaponType(newWeapon.WeaponAssetName, newWeapon.WeaponClassName, newWeapon.WeaponName);
     }
@@ -767,6 +769,7 @@ public class FortniteReplayBuilder
             WeaponType = weapon?.WeaponType,
             WeaponAssetName = weapon?.WeaponAssetName,
             WeaponClassName = weapon?.WeaponClassName,
+            WeaponItemDefinition = weapon?.WeaponItemDefinition,
             Location = location,
             Normal = normal,
             TraceStart = effectContext?.HitResult?.TraceStart,
@@ -857,9 +860,56 @@ public class FortniteReplayBuilder
             WeaponType = weapon?.WeaponType,
             WeaponAssetName = weapon?.WeaponAssetName,
             WeaponClassName = weapon?.WeaponClassName,
+            WeaponItemDefinition = weapon?.WeaponItemDefinition,
             Location = damageCues.Location ?? damageCues.NonPlayerLocation,
             Normal = damageCues.Normal ?? damageCues.NonPlayerNormal
         });
+    }
+
+    private string? ResolveWeaponItemDefinition(WeaponData weapon)
+    {
+        PlayerData? ownerPlayer = null;
+        if (weapon.OwnerActor.HasValue)
+        {
+            TryGetPlayerDataFromActor(weapon.OwnerActor.Value, out ownerPlayer);
+        }
+
+        if (ownerPlayer is null && weapon.InstigatorActor.HasValue)
+        {
+            TryGetPlayerDataFromActor(weapon.InstigatorActor.Value, out ownerPlayer);
+        }
+
+        if (!ownerPlayer?.InventoryId.HasValue ?? true)
+        {
+            return null;
+        }
+
+        if (!_inventories.TryGetValue(ownerPlayer.InventoryId.Value, out var inventory))
+        {
+            return null;
+        }
+
+        var candidates = inventory.Items
+            .Where(item => !string.IsNullOrWhiteSpace(item.ItemDefinition)
+                           && item.ItemDefinition.Contains("WID_", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var normalizedType = NormalizeWeaponType(weapon.WeaponAssetName, weapon.WeaponClassName, weapon.WeaponName);
+        return candidates
+            .OrderByDescending(item => weapon.AmmoCount.HasValue && item.LoadedAmmo == weapon.AmmoCount)
+            .ThenByDescending(item => weapon.WeaponLevel.HasValue && item.Level == weapon.WeaponLevel)
+            .ThenByDescending(item => string.Equals(
+                NormalizeWeaponType(item.ItemDefinition, weapon.WeaponClassName, weapon.WeaponName),
+                normalizedType,
+                StringComparison.OrdinalIgnoreCase))
+            .ThenBy(item => item.OrderIndex ?? ushort.MaxValue)
+            .Select(item => item.ItemDefinition)
+            .FirstOrDefault();
     }
 
     private WeaponData? ResolveWeapon(PlayerData? player, params uint?[] directReferences)
