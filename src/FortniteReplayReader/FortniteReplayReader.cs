@@ -118,12 +118,12 @@ public class ReplayReader : Unreal.Core.ReplayReader<FortniteReplay>
             case ActiveGameplayModifier modifier:
                 Builder.UpdateGameplayModifiers(modifier);
                 break;
-            //case FortPickup pickup:
-            //Builder.CreatePickupEvent(channelIndex, pickup);
-            //break;
-            //case FortInventory inventory:
-            //    Builder.UpdateInventory(channelIndex, inventory);
-            //    break;
+            case FortInventory inventory:
+                Builder.UpdateInventory(channelIndex, inventory);
+                break;
+            case HealthSet healthSet:
+                Builder.UpdateHealthSet(channelIndex, healthSet);
+                break;
             case SpawnMachineRepData spawnMachine:
                 Builder.UpdateRebootVan(channelIndex, spawnMachine);
                 break;
@@ -146,12 +146,12 @@ public class ReplayReader : Unreal.Core.ReplayReader<FortniteReplay>
             case PlayerPawn pawn:
                 Builder.UpdatePlayerPawn(channelIndex, pawn);
                 break;
-            //case FortPickup pickup:
-            //Builder.CreatePickupEvent(channelIndex, pickup);
-            //break;
-            //case FortInventory inventory:
-            //    Builder.UpdateInventory(channelIndex, inventory);
-            //    break;
+            case FortInventory inventory:
+                Builder.UpdateInventory(channelIndex, inventory);
+                break;
+            case HealthSet healthSet:
+                Builder.UpdateHealthSet(channelIndex, healthSet);
+                break;
             //case BroadcastExplosion explosion:
             //    Builder.UpdateExplosion(explosion);
             //    break;
@@ -167,9 +167,9 @@ public class ReplayReader : Unreal.Core.ReplayReader<FortniteReplay>
             case FortPoiManager poimanager:
                 Builder.UpdatePoiManager(poimanager);
                 break;
-            //case GameplayCue gameplayCue:
-            //    Builder.UpdateGameplayCue(channelIndex, gameplayCue);
-            //    break;
+            case GameplayCue gameplayCue:
+                Builder.UpdateGameplayCue(channelIndex, gameplayCue);
+                break;
             case BatchedDamageCues damageCues:
                 Builder.UpdateDamageCues(channelIndex, damageCues);
                 break;

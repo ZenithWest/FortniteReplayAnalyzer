@@ -74,8 +74,26 @@ public class PlayerData
     public double? DeathTimeDouble { get; set; }
     public Cosmetics Cosmetics { get; set; }
     public uint? CurrentWeapon { get; internal set; }
+    public float? CurrentHealth { get; set; }
+    public float? MaxHealth { get; set; }
+    public float? CurrentShield { get; set; }
+    public float? MaxShield { get; set; }
+    public IList<PlayerVitalsSnapshot> Vitals { get; set; } = new List<PlayerVitalsSnapshot>();
 
     public IList<PlayerMovement> Locations { get; set; } = new List<PlayerMovement>();
+}
+
+public class PlayerVitalsSnapshot
+{
+    public float? ReplicatedWorldTimeSeconds { get; set; }
+    public double? ReplicatedWorldTimeSecondsDouble { get; set; }
+    public float? Health { get; set; }
+    public float? MaxHealth { get; set; }
+    public float? Shield { get; set; }
+    public float? MaxShield { get; set; }
+    public float? HealthDelta { get; set; }
+    public float? ShieldDelta { get; set; }
+    public bool IsHealing => (HealthDelta ?? 0F) > 0F || (ShieldDelta ?? 0F) > 0F;
 }
 
 public class Cosmetics

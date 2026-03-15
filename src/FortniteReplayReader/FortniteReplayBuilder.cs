@@ -220,6 +220,24 @@ public class FortniteReplayBuilder
         return false;
     }
 
+    private bool TryResolvePlayerByChannel(uint channelIndex, [NotNullWhen(returnValue: true)] out PlayerData? playerData)
+    {
+        if (_pawnChannelToStateChannel.TryGetValue(channelIndex, out var stateChannel)
+            && _players.TryGetValue(stateChannel, out playerData))
+        {
+            return true;
+        }
+
+        if (_channelToActor.TryGetValue(channelIndex, out var actorId)
+            && TryGetPlayerDataFromActor(actorId, out playerData))
+        {
+            return true;
+        }
+
+        playerData = null;
+        return false;
+    }
+
     private void HandleQueuedPlayerPawns(uint stateChannelIndex)
     {
         if (_channelToActor.TryGetValue(stateChannelIndex, out var actorId))
@@ -554,13 +572,18 @@ public class FortniteReplayBuilder
             }
         }
 
-        if (!fortInventory.A.HasValue)
+        if (string.IsNullOrWhiteSpace(fortInventory.ItemDefinition?.Name)
+            && !fortInventory.Handle.HasValue
+            && !fortInventory.OrderIndex.HasValue
+            && !fortInventory.LoadedAmmo.HasValue
+            && !fortInventory.Count.HasValue)
         {
             return;
         }
 
         var inventoryItem = new InventoryItem()
         {
+            Handle = fortInventory.Handle,
             Count = fortInventory.Count,
             ItemDefinition = fortInventory.ItemDefinition?.Name,
             OrderIndex = fortInventory.OrderIndex,
@@ -572,7 +595,70 @@ public class FortniteReplayBuilder
             C = fortInventory.C,
             D = fortInventory.D
         };
-        inventory.Items.Add(inventoryItem);
+
+        var existingItem = inventory.Items.FirstOrDefault(item =>
+            (inventoryItem.Handle.HasValue && item.Handle == inventoryItem.Handle)
+            || (!string.IsNullOrWhiteSpace(inventoryItem.ItemDefinition)
+                && string.Equals(item.ItemDefinition, inventoryItem.ItemDefinition, StringComparison.OrdinalIgnoreCase)
+                && item.OrderIndex == inventoryItem.OrderIndex));
+
+        if (existingItem is null)
+        {
+            inventory.Items.Add(inventoryItem);
+            return;
+        }
+
+        existingItem.Count = inventoryItem.Count ?? existingItem.Count;
+        existingItem.ItemDefinition = inventoryItem.ItemDefinition ?? existingItem.ItemDefinition;
+        existingItem.OrderIndex = inventoryItem.OrderIndex ?? existingItem.OrderIndex;
+        existingItem.Durability = inventoryItem.Durability ?? existingItem.Durability;
+        existingItem.Level = inventoryItem.Level ?? existingItem.Level;
+        existingItem.LoadedAmmo = inventoryItem.LoadedAmmo ?? existingItem.LoadedAmmo;
+        existingItem.A = inventoryItem.A ?? existingItem.A;
+        existingItem.B = inventoryItem.B ?? existingItem.B;
+        existingItem.C = inventoryItem.C ?? existingItem.C;
+        existingItem.D = inventoryItem.D ?? existingItem.D;
+    }
+
+    public void UpdateHealthSet(uint channelIndex, HealthSet healthSet)
+    {
+        if (!TryResolvePlayerByChannel(channelIndex, out var playerData))
+        {
+            return;
+        }
+
+        var previousHealth = playerData.CurrentHealth;
+        var previousShield = playerData.CurrentShield;
+
+        playerData.CurrentHealth = healthSet.HealthCurrentValue;
+        playerData.MaxHealth = healthSet.HealthMaxValue;
+        playerData.CurrentShield = healthSet.ShieldCurrentValue;
+        playerData.MaxShield = healthSet.ShieldMaxValue;
+
+        var healthDelta = previousHealth.HasValue ? healthSet.HealthCurrentValue - previousHealth.Value : (float?)null;
+        var shieldDelta = previousShield.HasValue ? healthSet.ShieldCurrentValue - previousShield.Value : (float?)null;
+
+        var latest = playerData.Vitals.LastOrDefault();
+        if (latest is not null
+            && latest.Health == healthSet.HealthCurrentValue
+            && latest.Shield == healthSet.ShieldCurrentValue
+            && latest.MaxHealth == healthSet.HealthMaxValue
+            && latest.MaxShield == healthSet.ShieldMaxValue)
+        {
+            return;
+        }
+
+        playerData.Vitals.Add(new PlayerVitalsSnapshot
+        {
+            ReplicatedWorldTimeSeconds = ReplicatedWorldTimeSeconds,
+            ReplicatedWorldTimeSecondsDouble = ReplicatedWorldTimeSecondsDouble,
+            Health = healthSet.HealthCurrentValue,
+            MaxHealth = healthSet.HealthMaxValue,
+            Shield = healthSet.ShieldCurrentValue,
+            MaxShield = healthSet.ShieldMaxValue,
+            HealthDelta = healthDelta,
+            ShieldDelta = shieldDelta
+        });
     }
 
     public void UpdateWeapon(uint channelIndex, BaseWeapon weapon)

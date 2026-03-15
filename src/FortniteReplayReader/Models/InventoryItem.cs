@@ -2,6 +2,7 @@
 
 public class InventoryItem
 {
+    public int? Handle { get; set; }
     public int? Count { get; set; }
     public string ItemDefinition { get; set; }
     public ushort? OrderIndex { get; set; }
